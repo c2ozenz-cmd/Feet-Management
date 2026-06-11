@@ -1,0 +1,245 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-speedometer2 me-2 text-primary" style="color:var(--claude-primary)!important"></i>แดชบอร์ด</h2>
+    <p class="page-subtitle">ภาพรวมระบบแจ้งซ่อมรถบัส</p>
+  </div>
+  <div class="text-muted small" id="dashDatetime"></div>
+</div>
+
+<!-- Stat Cards — เน้น actionable -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-xl-3">
+    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
+      <div class="stat-icon yellow"><i class="bi bi-clock"></i></div>
+      <div>
+        <div class="stat-value" id="dashWaiting">—</div>
+        <div class="stat-label">รอดำเนินการ</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
+      <div class="stat-icon orange"><i class="bi bi-gear"></i></div>
+      <div>
+        <div class="stat-value" id="dashInProgress">—</div>
+        <div class="stat-label">กำลังซ่อม</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
+      <div class="stat-icon blue"><i class="bi bi-box-seam"></i></div>
+      <div>
+        <div class="stat-value" id="dashWaitingParts">—</div>
+        <div class="stat-label">รออะไหล่</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-xl-3">
+    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('po')">
+      <div class="stat-icon green"><i class="bi bi-file-earmark-check"></i></div>
+      <div>
+        <div class="stat-value" id="dashPOPending">—</div>
+        <div class="stat-label">PO รออนุมัติ</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- รายการซ่อมที่ค้างอยู่ (ไม่เสร็จ) -->
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-list-task"></i></div>
+        งานค้างอยู่
+        <span class="badge rounded-pill ms-2"
+          style="background:rgba(217,119,87,0.15);color:var(--claude-primary);font-size:11px"
+          id="dashPendingCount">0</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>เลขที่</th>
+                <th>ทะเบียน</th>
+                <th>สถานะ</th>
+                <th>วันที่</th>
+              </tr>
+            </thead>
+            <tbody id="dashRecentRepairs">
+              <tr><td colspan="4" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5 d-flex flex-column gap-3">
+    <!-- อะไหล่ใกล้หมด -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon"
+          style="background:rgba(192,80,80,0.12);color:var(--claude-danger)">
+          <i class="bi bi-exclamation-triangle"></i>
+        </div>
+        อะไหล่ใกล้หมด / หมดแล้ว
+      </div>
+      <div class="card-body p-0">
+        <div id="dashLowStock" class="p-3">
+          <div class="text-center text-muted py-2">กำลังโหลด...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- รถใกล้หมดอายุ (ใหม่) -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon"
+          style="background:rgba(212,160,68,0.12);color:var(--claude-warning)">
+          <i class="bi bi-calendar-x"></i>
+        </div>
+        ทะเบียน / ประกันใกล้หมดอายุ
+      </div>
+      <div class="card-body p-0">
+        <div id="dashExpiryAlert" class="p-3">
+          <div class="text-center text-muted py-2">กำลังโหลด...</div>
+        </div>
+      </div>
+    </div>
+</div>
+</div>
+
+<!-- ── Weekly Summary Widget ── -->
+<div class="row g-3 mt-3">
+  <div class="col-12">
+    <div class="card">
+
+      <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="card-icon"><i class="bi bi-calendar-week"></i></div>
+          <div>
+            <div style="font-weight:600;color:var(--claude-secondary)">สรุปรายสัปดาห์</div>
+            <div class="text-muted" style="font-size:12px" id="weeklyLabel">กำลังโหลด...</div>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-secondary" onclick="shiftWeek(-1)" title="สัปดาห์ก่อน">
+            <i class="bi bi-chevron-left"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="shiftWeek(0)" title="สัปดาห์นี้">
+            <i class="bi bi-circle"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="weekNextBtn"
+            onclick="shiftWeek(1)" title="สัปดาห์ถัดไป" disabled>
+            <i class="bi bi-chevron-right"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-primary" onclick="openWeeklyModal()">
+            <i class="bi bi-list-ul me-1"></i>รายละเอียด
+          </button>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <!-- 4 stat cards -->
+        <div class="row g-3">
+          <div class="col-6 col-md-3">
+            <div class="stat-card">
+              <div class="stat-icon orange"><i class="bi bi-plus-circle"></i></div>
+              <div>
+                <div class="stat-value" id="wkOpened">—</div>
+                <div class="stat-label">เปิดงานใหม่</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="stat-card">
+              <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
+              <div>
+                <div class="stat-value" id="wkDone">—</div>
+                <div class="stat-label">ปิดงานสำเร็จ</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="stat-card">
+              <div class="stat-icon yellow"><i class="bi bi-hourglass-split"></i></div>
+              <div>
+                <div class="stat-value" id="wkPending">—</div>
+                <div class="stat-label">งานค้างทั้งหมด</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="stat-card">
+              <div class="stat-icon blue"><i class="bi bi-arrow-left-right"></i></div>
+              <div>
+                <div class="stat-value" id="wkCarry">—</div>
+                <div class="stat-label">ค้างข้ามสัปดาห์</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top plates + By status -->
+        <div class="row g-3 mt-1" id="weeklyExtra" style="display:none">
+          <div class="col-12 col-md-6">
+            <div style="font-size:12px;font-weight:600;color:var(--claude-text-muted);
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+              รถซ่อมบ่อยสุด (สัปดาห์นี้)
+            </div>
+            <div id="wkTopPlates">—</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <div style="font-size:12px;font-weight:600;color:var(--claude-text-muted);
+                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+              งานค้างแยกตามสถานะ
+            </div>
+            <div id="wkByStatus">—</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Weekly Detail Modal ── -->
+<div class="modal fade" id="weeklyModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-calendar-week me-2"></i>งานค้าง —
+          <span id="weeklyModalLabel" style="color:var(--claude-primary)"></span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="table-wrapper">
+          <table class="table mb-0">
+            <thead>
+              <tr>
+                <th>เลขที่ซ่อม</th>
+                <th>วันที่แจ้ง</th>
+                <th>ทะเบียน</th>
+                <th>รายการซ่อม</th>
+                <th>สถานะ</th>
+                <th>ค้างมา (วัน)</th>
+              </tr>
+            </thead>
+            <tbody id="weeklyModalBody">
+              <tr><td colspan="6" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <span class="text-muted small" id="weeklyModalCount"></span>
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">ปิด</button>
+      </div>
+    </div>
+  </div>
+</div>

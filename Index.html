@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบแจ้งซ่อมรถบัส</title>
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+
+  <?!= include('Css'); ?>
+</head>
+<body>
+
+<!-- LOGIN PAGE -->
+<div id="loginPage" class="login-wrapper">
+  <div class="login-bg-shapes">
+    <div class="shape shape-1"></div>
+    <div class="shape shape-2"></div>
+    <div class="shape shape-3"></div>
+  </div>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-icon"><i class="bi bi-bus-front-fill"></i></div>
+      <h1>Bus Repair</h1>
+      <p>ระบบจัดการซ่อมบำรุงรถบัส</p>
+    </div>
+    <div class="login-form">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">ชื่อผู้ใช้</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-person"></i></span>
+          <input type="text" id="loginUsername" class="form-control" placeholder="กรอกชื่อผู้ใช้">
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="form-label fw-semibold">รหัสผ่าน</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-lock"></i></span>
+          <input type="password" id="loginPassword" class="form-control" placeholder="กรอกรหัสผ่าน">
+          <button class="btn btn-outline-secondary" type="button" id="togglePass">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+      </div>
+      <button class="btn btn-primary w-100 btn-lg" id="loginBtn">
+        <i class="bi bi-box-arrow-in-right me-2"></i>เข้าสู่ระบบ
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="mainApp" class="d-none">
+  <?!= include('topbar'); ?>
+  <div class="app-wrapper">
+    <?!= include('sidebar'); ?>
+    <main class="main-content" id="mainContent">
+      <!-- Pages injected here -->
+      <div id="page-dashboard"><?!= include('page_dashboard'); ?></div>
+      <div id="page-repairs" class="d-none"><?!= include('page_repairs'); ?></div>
+      <div id="page-po" class="d-none"><?!= include('page_po'); ?></div>
+      <div id="page-stock" class="d-none"><?!= include('page_stock'); ?></div>
+      <div id="page-shops" class="d-none"><?!= include('page_shops'); ?></div>
+      <div id="page-buses" class="d-none"><?!= include('page_buses'); ?></div>
+      <div id="page-users" class="d-none"><?!= include('page_users'); ?></div>
+      <div id="page-settings" class="d-none"><?!= include('page_settings'); ?></div>
+      <div id="page-summary" class="d-none"><?!= include('page_summary'); ?></div>
+      <div id="page-oiltemplate" class="d-none"><?!= include('page_oiltemplate'); ?></div>
+    </main>
+  </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<!-- SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<?!= include('Js'); ?>
+
+</body>
+</html>

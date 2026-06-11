@@ -1,0 +1,110 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-people me-2" style="color:var(--claude-primary)"></i>จัดการผู้ใช้</h2>
+    <p class="page-subtitle">เพิ่ม แก้ไข ลบ ผู้ใช้งานระบบ</p>
+  </div>
+  <button class="btn btn-primary" onclick="showUserModal()">
+    <i class="bi bi-person-plus me-1"></i>เพิ่มผู้ใช้
+  </button>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>ชื่อผู้ใช้</th>
+            <th>ชื่อ-สกุล</th>
+            <th>บทบาท</th>
+            <th>สถานะ</th>
+            <th class="text-center">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="usersTableBody">
+          <tr><td colspan="6" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- User Modal -->
+<div class="modal fade" id="userModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="userModalTitle">เพิ่ม/แก้ไขผู้ใช้</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editUserId">
+        <div class="row g-3">
+          <div class="col-6">
+            <label class="form-label">ชื่อผู้ใช้ <span class="text-danger">*</span></label>
+            <input type="text" id="userUsername" class="form-control" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">รหัสผ่าน <span class="text-danger" id="pwRequired">*</span></label>
+            <input type="password" id="userPassword" class="form-control" placeholder="(เว้นว่างไว้เพื่อไม่เปลี่ยน)">
+          </div>
+          <div class="col-12">
+            <label class="form-label">ชื่อ-สกุล <span class="text-danger">*</span></label>
+            <input type="text" id="userName" class="form-control" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">บทบาท</label>
+            <select id="userRole" class="form-select">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">สถานะ</label>
+            <select id="userStatus" class="form-select">
+              <option value="active">เปิดใช้งาน</option>
+              <option value="inactive">ปิดใช้งาน</option>
+            </select>
+          </div>
+          
+            <div class="col-12">
+              <hr class="my-1">
+              <p class="text-muted small mb-2"><i class="bi bi-line me-1" style="color:#06C755"></i>ข้อมูล LINE</p>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">Line User ID</label>
+              <div class="input-group">
+                <input type="text" class="form-control" id="userLineUserId"
+                      placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="copyLineId()" title="คัดลอก">
+                  <i class="bi bi-clipboard"></i>
+                </button>
+              </div>
+              <div class="form-text">ให้ผู้ใช้ส่งข้อความหา Bot แล้วนำ ID ที่ได้มากรอกที่นี่</div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">ลายเซ็นต์ (URL รูปภาพ)</label>
+              <input type="text" class="form-control" id="userSignatureUrl"
+                    placeholder="https://drive.google.com/..."
+                    onchange="previewSignature()">
+              <div class="form-text">URL รูปลายเซ็นต์สำหรับแปะใน PDF</div>
+              <div id="sigPreviewBox" class="mt-2" style="display:none">
+                <img id="sigPreview"
+                    style="max-height:60px;border:1px solid var(--claude-border);border-radius:6px;padding:4px;background:#fff">
+              </div>
+            </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveUser()">
+          <i class="bi bi-save me-1"></i>บันทึก
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,300 @@
+<!-- PO LIST VIEW -->
+<div id="poListView">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title"><i class="bi bi-file-earmark-text me-2" style="color:var(--claude-primary)"></i>ใบสั่งซื้ออะไหล่ (PO)</h2>
+      <p class="page-subtitle">จัดการใบสั่งซื้ออะไหล่ทั้งหมด</p>
+    </div>
+    <button class="btn btn-primary admin-only" onclick="showPOForm()">
+      <i class="bi bi-plus-lg me-1"></i>สร้าง PO ใหม่
+    </button>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า..." oninput="filterPOs()">
+    <select id="poStatusFilter" class="form-select" style="max-width:180px" onchange="filterPOs()">
+      <option value="">ทุกสถานะ</option>
+      <option value="รออนุมัติ">รออนุมัติ</option>
+      <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
+      <option value="รับของแล้ว">รับของแล้ว</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>เลขที่ PO</th><th>ร้านค้า</th><th>อ้างอิงซ่อม</th>
+              <th>ทะเบียนรถ</th><th>วันที่ออก</th><th>สถานะ</th>
+              <th class="text-center">จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="poTableBody">
+            <tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PO FORM VIEW -->
+<div id="poFormView" class="d-none">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title"><i class="bi bi-file-earmark-plus me-2" style="color:var(--claude-primary)"></i>
+        <span id="poFormTitle">สร้าง PO ใหม่</span>
+      </h2>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+          <li class="breadcrumb-item"><a href="#" onclick="showPOList()">รายการ PO</a></li>
+          <li class="breadcrumb-item active" id="poFormBreadcrumb">ใหม่</li>
+        </ol>
+      </nav>
+    </div>
+    <button class="btn btn-outline-secondary" onclick="showPOList()">
+      <i class="bi bi-arrow-left me-1"></i>กลับ
+    </button>
+  </div>
+
+  <input type="hidden" id="editPONo">
+
+  <!-- Card 1: ข้อมูลร้านค้า -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-icon"><i class="bi bi-shop"></i></div>
+    ข้อมูลร้านค้า / ผู้ขาย
+    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="navigateTo('shops')"
+      title="จัดการข้อมูลร้านค้า">
+      <i class="bi bi-pencil-square me-1"></i>จัดการร้านค้า
+    </button>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+
+      <div class="col-md-4">
+        <label class="form-label">เลขที่ PO</label>
+        <input type="text" id="poNo" class="form-control" placeholder="สร้างอัตโนมัติ" readonly
+          style="background:var(--claude-bg);color:var(--claude-text-muted)">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">วันที่ออก <span class="text-danger">*</span></label>
+        <input type="date" id="poIssueDate" class="form-control" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">ทะเบียนรถ <span class="text-danger">*</span></label>
+        <div class="combo-wrapper">
+          <input type="text" id="poPlate" class="form-control"
+            placeholder="พิมพ์หรือเลือกทะเบียน..."
+            oninput="showComboList('poPlate','poPlateComboList', allBuses, 'plate')"
+            autocomplete="off"
+            required>
+          <ul id="poPlateComboList" class="combo-list"></ul>
+        </div>
+      </div>
+
+      <!-- ✅ ชื่อร้านค้า — Combobox -->
+      <div class="col-md-6">
+        <label class="form-label">
+          ชื่อร้านค้า <span class="text-danger">*</span>
+          <span class="text-muted small ms-1">(พิมพ์เพื่อค้นหา หรือกรอกใหม่)</span>
+        </label>
+        <div class="combo-wrapper">
+          <input type="text" id="poShopName" class="form-control"
+            placeholder="พิมพ์ชื่อร้านค้า..."
+            oninput="showComboList('poShopName','shopComboList', allShops, 'name')"
+            onchange="onShopNameChange()"
+            autocomplete="off"
+            required>
+          <ul id="shopComboList" class="combo-list"></ul>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">เลขที่ผู้เสียภาษี</label>
+        <input type="text" id="poTaxId" class="form-control" placeholder="เลขที่ผู้เสียภาษี">
+      </div>
+      <div class="col-12">
+        <label class="form-label">ที่อยู่ร้านค้า</label>
+        <textarea id="poShopAddress" class="form-control" rows="2" placeholder="ที่อยู่ร้านค้า"></textarea>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">วันที่ใบเสนอราคา</label>
+        <input type="date" id="poQuoteDate" class="form-control">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">เลขที่ใบเสนอราคา</label>
+        <input type="text" id="poQuoteNo" class="form-control" placeholder="เลขที่ใบเสนอราคา">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">อ้างอิงเลขจ็อบซ่อม</label>
+        <input type="text" id="poRefRepairNo" class="form-control" placeholder="เลขที่แจ้งซ่อม">
+      </div>
+
+    </div>
+  </div>
+</div>
+
+  <!-- Card 2: รายการอะไหล่ -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon"><i class="bi bi-list-ul"></i></div>
+      รายการสั่งอะไหล่
+      <div class="ms-auto d-flex gap-2 align-items-center">
+        <select id="poVatType" class="form-select form-select-sm" style="width:150px" onchange="calcPOTotal()">
+          <option value="none">ไม่มี VAT</option>
+          <option value="exclusive">VAT นอก (7%)</option>
+          <option value="inclusive">VAT ใน (7%)</option>
+        </select>
+        <button class="btn btn-sm btn-outline-primary ms-auto" onclick="openPOPartPicker()">
+          <i class="bi bi-plus-lg me-1"></i>เพิ่มรายการ
+        </button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="overflow:visible">
+        <table class="table mb-0" style="font-size:13px">
+          <thead>
+            <tr>
+              <th style="width:45px">ลำดับ</th>
+              <th>อะไหล่</th>
+              <th style="width:80px">จำนวน</th>
+              <th style="width:80px">หน่วย</th>
+              <th style="width:105px">ราคา/หน่วย</th>
+              <th style="width:85px">ส่วนลด</th>
+              <th style="width:105px">จำนวนเงิน</th>
+              <th style="width:45px"></th>
+            </tr>
+          </thead>
+          <tbody id="poItemsBody">
+            <tr id="poItemsEmpty">
+              <td colspan="8" class="text-center text-muted py-3">ยังไม่มีรายการ</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr style="background:var(--claude-bg)">
+              <td colspan="6" class="text-end fw-semibold">ยอดรวมก่อน VAT</td>
+              <td id="poSubtotal" class="fw-semibold text-end pe-3">0.00</td><td></td>
+            </tr>
+            <tr id="poVatRow" style="display:none;background:var(--claude-bg)">
+              <td colspan="6" class="text-end">VAT 7%</td>
+              <td id="poVatAmount" class="text-end pe-3">0.00</td><td></td>
+            </tr>
+            <tr style="background:rgba(217,119,87,0.06)">
+              <td colspan="6" class="text-end fw-bold">ยอดรวมสุทธิ</td>
+              <td id="poGrandTotal" class="fw-bold text-end pe-3" style="color:var(--claude-primary)">0.00</td><td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 3: สถานะ PO -->
+  <div class="card" id="poStatusCard" style="display:none!important">
+    <div class="card-header">
+      <div class="card-icon"><i class="bi bi-diagram-3"></i></div>สถานะใบสั่งซื้อ
+    </div>
+    <div class="card-body">
+      <div class="po-stepper" id="poStepperForm"></div>
+      <div class="mt-3 d-flex gap-2 flex-wrap admin-only">
+      <button class="btn btn-sm btn-outline-secondary" onclick="changePOStatus('รออนุมัติ')"><i class="bi bi-hourglass me-1"></i>รออนุมัติ</button>
+      <button class="btn btn-sm btn-warning" onclick="changePOStatus('อนุมัติแล้ว')"><i class="bi bi-check me-1"></i>อนุมัติแล้ว</button>
+      <button class="btn btn-sm btn-success" onclick="changePOStatus('รับของแล้ว')"><i class="bi bi-box-seam me-1"></i>รับของแล้ว</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 justify-content-end">
+    <button class="btn btn-outline-secondary" onclick="showPOList()"><i class="bi bi-x-lg me-1"></i>ยกเลิก</button>
+    <button class="btn btn-info" onclick="previewPO()"><i class="bi bi-printer me-1"></i>Preview & พิมพ์</button>
+    <button class="btn btn-primary" onclick="savePO()"><i class="bi bi-save me-1"></i>บันทึก</button>
+  </div>
+</div>
+
+<!-- Print Modal -->
+<div class="modal fade" id="printModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-printer me-2"></i>ตัวอย่างใบสั่งซื้อ</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="printPreview" style="padding:32px"></div>
+      </div>
+      <div class="modal-footer" id="printModalFooter">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ปิด</button>
+        <button class="btn btn-primary" onclick="printPO()"><i class="bi bi-printer me-1"></i>พิมพ์</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PO Part Picker Modal (Multi-Select) -->
+<div class="modal fade" id="poPartPickerModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-gear me-2"></i>เลือกอะไหล่สำหรับ PO</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex gap-2 mb-3 align-items-center">
+          <input type="text" id="poPartPickerSearch" class="form-control form-control-sm"
+            placeholder="ค้นหาอะไหล่..." oninput="filterPOPartPicker()">
+          <span id="poPartPickerSelectedCount"
+            class="badge rounded-pill flex-shrink-0"
+            style="background:var(--claude-primary);font-size:12px;white-space:nowrap">
+            เลือก 0 รายการ
+          </span>
+        </div>
+
+        <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+          <table class="table table-hover mb-0" style="font-size:13px">
+            <thead style="position:sticky;top:0;background:var(--claude-bg);z-index:1">
+              <tr>
+                <th style="width:36px">
+                  <input type="checkbox" id="poPartPickerSelectAll"
+                    onchange="toggleSelectAllPOParts(this)">
+                </th>
+                <th>รหัส</th>
+                <th>ชื่ออะไหล่</th>
+                <th class="text-end">คงเหลือ</th>
+                <th>หน่วย</th>
+              </tr>
+            </thead>
+            <tbody id="poPartPickerBody"></tbody>
+          </table>
+        </div>
+
+        <!-- พิมพ์เองถ้าไม่มีในรายการ -->
+        <div class="mt-3 p-3 rounded"
+          style="background:var(--claude-bg);border:1px dashed var(--claude-border)">
+          <div class="text-muted small mb-2">
+            <i class="bi bi-pencil me-1"></i>ไม่มีในรายการ? พิมพ์ชื่ออะไหล่หรือรายการซ่อม
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" id="poPartPickerCustom" class="form-control form-control-sm"
+              placeholder="พิมพ์ชื่ออะไหล่ใหม่หรือรายการซ่อม"
+              onkeypress="if(event.key==='Enter') pickPOCustomPart()">
+            <button class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="pickPOCustomPart()">
+              <i class="bi bi-plus-lg me-1"></i>เพิ่ม
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" id="confirmPOPartPickBtn"
+          onclick="confirmPOMultiPick()" disabled>
+          <i class="bi bi-check-lg me-1"></i>เพิ่มรายการที่เลือก (0)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

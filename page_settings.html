@@ -1,0 +1,176 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-gear me-2" style="color:var(--claude-primary)"></i>ตั้งค่าระบบ</h2>
+    <p class="page-subtitle">กำหนดค่าพารามิเตอร์ระบบ</p>
+  </div>
+</div>
+
+<!-- ── Company Info Card ── -->
+<div class="card mb-3">
+  <div class="card-header">
+    <div class="card-icon"><i class="bi bi-building"></i></div>
+    ข้อมูลบริษัท / Company Info
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+
+      <!-- Logo + Stamp side by side -->
+      <div class="col-md-6">
+        <label class="form-label">
+          <i class="bi bi-image me-1" style="color:var(--claude-primary)"></i>
+          โลโก้บริษัท <span class="text-muted small">(URL รูปภาพ)</span>
+        </label>
+        <div class="input-group">
+          <input type="text" class="form-control" id="settingLogoUrl"
+            placeholder="https://... หรือ Google Drive Share URL">
+          <button class="btn btn-outline-secondary" onclick="previewLogo()" title="ดูตัวอย่าง">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+        <div class="mt-2 d-flex align-items-center gap-3">
+          <img id="settingLogoPreview" src="" alt="Logo Preview"
+            style="display:none;height:80px;width:80px;object-fit:contain;border-radius:8px;border:1px solid var(--claude-border)">
+          <div id="settingLogoEmpty" class="d-flex align-items-center justify-content-center"
+            style="height:80px;width:80px;border-radius:8px;border:2px dashed var(--claude-border);color:var(--claude-text-muted);font-size:11px;text-align:center">
+            <span>ยังไม่มี<br>โลโก้</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ✅ ตราประทับบริษัท -->
+      <div class="col-md-6">
+        <label class="form-label">
+          <i class="bi bi-patch-check me-1" style="color:var(--claude-secondary)"></i>
+          ตราประทับบริษัท <span class="text-muted small">(URL รูปภาพ)</span>
+        </label>
+        <div class="input-group">
+          <input type="text" class="form-control" id="settingStampUrl"
+            placeholder="https://... หรือ Google Drive Share URL">
+          <button class="btn btn-outline-secondary" onclick="previewStamp()" title="ดูตัวอย่าง">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+        <div class="mt-2 d-flex align-items-center gap-3">
+          <img id="settingStampPreview" src="" alt="Stamp Preview"
+            style="display:none;height:80px;width:80px;object-fit:contain;border-radius:8px;border:1px solid var(--claude-border)">
+          <div id="settingStampEmpty" class="d-flex align-items-center justify-content-center"
+            style="height:80px;width:80px;border-radius:8px;border:2px dashed var(--claude-border);color:var(--claude-text-muted);font-size:11px;text-align:center">
+            <span>ยังไม่มี<br>ตราประทับ</span>
+          </div>
+        </div>
+        <div class="text-muted small mt-1">
+          <i class="bi bi-info-circle me-1"></i>
+          รูปพื้นหลังโปร่งใส (.png) จะแสดงผลดีที่สุด
+        </div>
+      </div>
+
+      <!-- Tip Google Drive -->
+      <div class="col-12">
+        <div class="p-2 rounded small" style="background:rgba(74,123,168,0.08);border:1px solid rgba(74,123,168,0.2)">
+          <i class="bi bi-google me-1" style="color:var(--claude-info)"></i>
+          <strong>วิธีใช้ Google Drive:</strong>
+          อัปโหลดรูปใน Drive → คลิกขวา "แชร์" → ตั้งเป็น "ทุกคนที่มีลิงก์" → คัดลอก URL มาวางที่นี่ ระบบจะแปลงให้อัตโนมัติ
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">ชื่อบริษัท (อังกฤษ)</label>
+        <input type="text" class="form-control" id="settingCompanyNameEN" placeholder="COMPANY NAME CO., LTD.">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">ชื่อบริษัท (ไทย)</label>
+        <input type="text" class="form-control" id="settingCompanyNameTH" placeholder="บริษัท ... จำกัด">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">ที่อยู่ (อังกฤษ)</label>
+        <textarea class="form-control" id="settingCompanyAddressEN" rows="2" placeholder="Address..."></textarea>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">ที่อยู่ (ไทย)</label>
+        <textarea class="form-control" id="settingCompanyAddressTH" rows="2" placeholder="ที่อยู่..."></textarea>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">เบอร์โทรศัพท์</label>
+        <input type="text" class="form-control" id="settingCompanyTel" placeholder="074-000-000">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">แฟกซ์</label>
+        <input type="text" class="form-control" id="settingCompanyFax" placeholder="074-000-000">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">เลขผู้เสียภาษี</label>
+        <input type="text" class="form-control" id="settingCompanyTaxId" placeholder="0000000000000">
+      </div>
+      <div class="col-12 text-end">
+        <button class="btn btn-primary" onclick="saveCompanySettings()">
+          <i class="bi bi-save me-1"></i>บันทึกข้อมูลบริษัท
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Other Settings Key-Value -->
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-sliders"></i></div>
+        การตั้งค่าอื่นๆ
+        <button class="btn btn-sm btn-outline-primary ms-auto" onclick="addSettingRow()">
+          <i class="bi bi-plus-lg me-1"></i>เพิ่มรายการ
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th>Key (A)</th>
+              <th>Value (B)</th>
+              <th style="width:50px"></th>
+            </tr>
+          </thead>
+          <tbody id="settingsBody">
+            <tr><td colspan="3" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-body border-top">
+        <button class="btn btn-primary" onclick="saveSettings()">
+          <i class="bi bi-save me-1"></i>บันทึกการตั้งค่า
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <!-- Link to Buses -->
+    <div class="card mb-3">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-bus-front"></i></div>
+        จัดการรถบัส
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">ข้อมูลทะเบียนรถ เลขคัสซี รุ่น ปี วันต่อทะเบียน และประกันภัย</p>
+        <button class="btn btn-outline-primary" onclick="navigateTo('buses')">
+          <i class="bi bi-bus-front me-1"></i>ไปหน้าจัดการรถบัส
+          <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Init Sheets -->
+    <!-- <div class="card">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-database"></i></div>
+        จัดการฐานข้อมูล
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">สร้าง Sheets ทั้งหมดในครั้งแรก หรือเมื่อต้องการ Reset</p>
+        <button class="btn btn-warning" onclick="initSheets()">
+          <i class="bi bi-database-add me-1"></i>สร้าง / Reset Sheets
+        </button>
+      </div>
+    </div> -->
+  </div>
+</div>

@@ -1,0 +1,57 @@
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-section-title">เมนูหลัก</div>
+
+  <a class="sidebar-nav-item " data-page="dashboard" onclick="navigateTo('dashboard')">
+    <div class="nav-icon"><i class="bi bi-speedometer2"></i></div>
+    <span>แดชบอร์ด</span>
+  </a>
+
+  <a class="sidebar-nav-item " data-page="summary" onclick="navigateTo('summary')">
+    <div class="nav-icon"><i class="bi bi-bar-chart-line"></i></div>
+    <span>สรุปค่าใช้จ่าย</span>
+  </a>
+
+  <a class="sidebar-nav-item" data-page="repairs" onclick="navigateTo('repairs')">
+    <div class="nav-icon"><i class="bi bi-tools"></i></div>
+    <span>แจ้งซ่อมรถบัส</span>
+  </a>
+
+  <a class="sidebar-nav-item" data-page="po" onclick="navigateTo('po')">
+    <div class="nav-icon"><i class="bi bi-file-earmark-text"></i></div>
+    <span>ใบสั่งซื้ออะไหล่ (PO)</span>
+  </a>
+
+  <a class="sidebar-nav-item" data-page="stock" onclick="navigateTo('stock')">
+    <div class="nav-icon"><i class="bi bi-boxes"></i></div>
+    <span>Stock อะไหล่</span>
+  </a>
+
+  <a class="sidebar-nav-item" data-page="shops" onclick="navigateTo('shops')">
+    <div class="nav-icon"><i class="bi bi-shop"></i></div>
+    <span>ร้านค้า</span>
+  </a>
+
+  <a class="sidebar-nav-item" data-page="buses" onclick="navigateTo('buses')">
+    <div class="nav-icon"><i class="bi bi-bus-front"></i></div>
+    <span>จัดการรถบัส</span>
+  </a>
+
+    <a class="sidebar-nav-item" data-page="oiltemplate" onclick="navigateTo('oiltemplate')">
+    <div class="nav-icon"><i class="bi bi-droplet-half"></i></div>
+    <span>ตั้งค่าโปรแกรมน้ำมันเครื่อง</span>
+  </a>
+
+  <div class="sidebar-divider"></div>
+  <div class="sidebar-section-title admin-only">จัดการระบบ</div>
+
+  <a class="sidebar-nav-item admin-only" data-page="users" onclick="navigateTo('users')">
+    <div class="nav-icon"><i class="bi bi-people"></i></div>
+    <span>จัดการผู้ใช้</span>
+  </a>
+
+  <a class="sidebar-nav-item admin-only" data-page="settings" onclick="navigateTo('settings')">
+    <div class="nav-icon"><i class="bi bi-gear"></i></div>
+    <span>ตั้งค่าระบบ</span>
+  </a>
+</aside>

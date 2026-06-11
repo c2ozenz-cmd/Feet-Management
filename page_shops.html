@@ -1,0 +1,78 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-shop me-2" style="color:var(--claude-primary)"></i>จัดการร้านค้า</h2>
+    <p class="page-subtitle">ข้อมูลร้านค้า / ผู้จัดจำหน่ายอะไหล่</p>
+  </div>
+  <button class="btn btn-primary admin-only" onclick="showShopModal()">
+    <i class="bi bi-plus-lg me-1"></i>เพิ่มร้านค้า
+  </button>
+</div>
+
+<div class="search-bar">
+  <input type="text" id="shopSearch" class="form-control" placeholder="ค้นหาชื่อร้าน / เลขผู้เสียภาษี..." oninput="filterShops()">
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>ชื่อร้านค้า</th>
+            <th>ที่อยู่</th>
+            <th>เลขผู้เสียภาษี</th>
+            <th>เบอร์โทร</th>
+            <th>หมายเหตุ</th>
+            <th class="text-center admin-only">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="shopTableBody">
+          <tr><td colspan="6" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Shop Modal -->
+<div class="modal fade" id="shopModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="shopModalTitle"><i class="bi bi-shop me-2"></i>เพิ่ม/แก้ไขร้านค้า</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editShopId">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label">ชื่อร้านค้า <span class="text-danger">*</span></label>
+            <input type="text" id="shopName" class="form-control" placeholder="ชื่อร้านค้า / บริษัท" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">เบอร์โทรศัพท์</label>
+            <input type="text" id="shopPhone" class="form-control" placeholder="0xx-xxx-xxxx">
+          </div>
+          <div class="col-12">
+            <label class="form-label">ที่อยู่</label>
+            <textarea id="shopAddress" class="form-control" rows="2" placeholder="ที่อยู่ร้านค้า"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">เลขที่ผู้เสียภาษี</label>
+            <input type="text" id="shopTaxId" class="form-control" placeholder="เลขผู้เสียภาษี 13 หลัก">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">หมายเหตุ</label>
+            <input type="text" id="shopNote" class="form-control" placeholder="หมายเหตุ">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveShop()">
+          <i class="bi bi-save me-1"></i>บันทึก
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

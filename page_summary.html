@@ -1,0 +1,177 @@
+<!-- หน้า Summary -->
+<div class="page-header">
+  <div>
+    <h2 class="page-title">
+      <i class="bi bi-bar-chart-line me-2" style="color:var(--claude-primary)"></i>
+      สรุปค่าใช้จ่าย
+    </h2>
+    <p class="page-subtitle">วิเคราะห์ค่าซ่อมและค่าอะไหล่</p>
+  </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label class="form-label small">จากวันที่</label>
+        <input type="date" id="sumFrom" class="form-control form-control-sm">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small">ถึงวันที่</label>
+        <input type="date" id="sumTo" class="form-control form-control-sm">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small">ทะเบียนรถ</label>
+        <div class="combo-wrapper">
+          <input type="text" id="sumPlate" class="form-control form-control-sm"
+            placeholder="ทั้งหมด"
+            oninput="showComboList('sumPlate','sumPlateList', allBuses, 'plate')"
+            autocomplete="off">
+          <ul id="sumPlateList" class="combo-list"></ul>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small">ร้านค้า</label>
+        <div class="combo-wrapper">
+          <input type="text" id="sumShop" class="form-control form-control-sm"
+            placeholder="ทั้งหมด"
+            oninput="showComboList('sumShop','sumShopList', allShops, 'name')"
+            autocomplete="off">
+          <ul id="sumShopList" class="combo-list"></ul>
+        </div>
+      </div>
+      <div class="col-12 col-md-2 d-flex gap-2">
+        <button class="btn btn-primary btn-sm w-100" onclick="loadSummary(true)">
+          <i class="bi bi-search me-1"></i>ค้นหา
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetSummaryFilter()" title="ล้าง">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Filter -->
+    <div class="d-flex gap-2 mt-2 flex-wrap">
+      <span class="text-muted small me-1">ช่วงเวลาด่วน:</span>
+      <button class="btn btn-xs btn-outline-secondary" onclick="setQuickFilter('month')">เดือนนี้</button>
+      <button class="btn btn-xs btn-outline-secondary" onclick="setQuickFilter('quarter')">ไตรมาสนี้</button>
+      <button class="btn btn-xs btn-outline-secondary" onclick="setQuickFilter('year')">ปีนี้</button>
+    </div>
+  </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon orange"><i class="bi bi-currency-dollar"></i></div>
+      <div>
+        <div class="stat-value" id="sumTotal">—</div>
+        <div class="stat-label">ยอดรวมทั้งหมด (บาท)</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon blue"><i class="bi bi-file-earmark-text"></i></div>
+      <div>
+        <div class="stat-value" id="sumCount">—</div>
+        <div class="stat-label">จำนวน PO</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon yellow"><i class="bi bi-bus-front"></i></div>
+      <div>
+        <div class="stat-value" id="sumTopPlate">—</div>
+        <div class="stat-label">รถที่ค่าซ่อมสูงสุด</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon green"><i class="bi bi-shop"></i></div>
+      <div>
+        <div class="stat-value" id="sumTopShop">—</div>
+        <div class="stat-label">ร้านที่สั่งมากสุด</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <!-- แยกตามรถ -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-bus-front"></i></div>
+        ค่าใช้จ่ายแยกตามรถ
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0" style="font-size:13px">
+            <thead>
+              <tr>
+                <th>ทะเบียน</th>
+                <th class="text-end">ยอดรวม (บาท)</th>
+                <th>สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody id="sumByPlateBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- แยกตามร้านค้า -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <div class="card-icon"><i class="bi bi-shop"></i></div>
+        ค่าใช้จ่ายแยกตามร้านค้า
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0" style="font-size:13px">
+            <thead>
+              <tr>
+                <th>ร้านค้า</th>
+                <th class="text-end">ยอดรวม (บาท)</th>
+                <th>สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody id="sumByShopBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- รายละเอียด PO -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-icon"><i class="bi bi-list-ul"></i></div>
+    รายละเอียด PO
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0" style="font-size:13px">
+        <thead>
+          <tr>
+            <th>เลขที่ PO</th>
+            <th>วันที่</th>
+            <th>ทะเบียน</th>
+            <th>ร้านค้า</th>
+            <th>อ้างอิงซ่อม</th>
+            <th class="text-end">ยอดรวม (บาท)</th>
+          </tr>
+        </thead>
+        <tbody id="sumDetailBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>

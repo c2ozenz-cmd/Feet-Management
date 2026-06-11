@@ -1,0 +1,3507 @@
+<script>
+// ============================================================
+// Js.html — Bus Repair System Frontend Logic
+// ============================================================
+
+// ── GLOBAL STATE ──
+let currentUser = null;
+let allRepairs = [];
+let allPOs = [];
+let allStock = [];
+let allBuses = [];
+let deductRows = [];
+let repairPartRows = [];
+let poItemRows = [];
+let pendingPORepairNo = null;
+let pendingPOPlate = null;
+let allShops = [];
+let oilTemplateRows = [];
+let allNotifications = [];
+let readNotifIds = new Set(
+  JSON.parse(sessionStorage.getItem('readNotifs') || '[]')
+);
+let _weekOffset = 0;
+let _weeklyData = null;
+
+// ── SWEETALERT HELPERS ──
+const Toast = Swal.mixin({
+  toast: true, position: 'top-end', showConfirmButton: false,
+  timer: 2800, timerProgressBar: true,
+  didOpen: t => { t.addEventListener('mouseenter', Swal.stopTimer); t.addEventListener('mouseleave', Swal.resumeTimer); }
+});
+
+function showToast(icon, title) { Toast.fire({ icon, title }); }
+
+function showLoading(text = 'กำลังประมวลผล...') {
+  Swal.fire({ title: text, allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+}
+
+function confirmAction(text, cb) {
+  Swal.fire({
+    title: 'ยืนยันการดำเนินการ?',
+    text, icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'ยืนยัน',
+    cancelButtonText: 'ยกเลิก',
+    reverseButtons: true
+  }).then(r => { if (r.isConfirmed) cb(); });
+}
+
+// ── AUTH ──
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('loginPassword').addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('togglePass').addEventListener('click', () => {
+  const pw = document.getElementById('loginPassword');
+  const ico = document.querySelector('#togglePass i');
+  pw.type = pw.type === 'password' ? 'text' : 'password';
+  ico.className = pw.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
+});
+
+function doLogin() {
+  const u = document.getElementById('loginUsername').value.trim();
+  const p = document.getElementById('loginPassword').value.trim();
+  if (!u || !p) { showToast('warning', 'กรุณากรอกข้อมูลให้ครบ'); return; }
+  showLoading('กำลังเข้าสู่ระบบ...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        currentUser = res.user;
+        sessionStorage.setItem('currentUser', JSON.stringify(res.user));
+        initApp();
+      } else { showToast('error', res.message); }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .login(u, p);
+}
+
+function initApp() {
+  document.getElementById('loginPage').classList.add('d-none');
+  document.getElementById('mainApp').classList.remove('d-none');
+  document.getElementById('topbarUserName').textContent = currentUser.name;
+  const rb = document.getElementById('topbarRoleBadge');
+  rb.textContent = currentUser.role === 'admin' ? 'Admin' : 'User';
+  if (currentUser.role !== 'admin') rb.classList.add('role-user');
+
+  // Hide admin-only elements for regular users
+  if (currentUser.role !== 'admin') {
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+  }
+
+  navigateTo('dashboard');
+  loadNotifications(); 
+  hydrateCurrentUserSignature();
+}
+
+function hydrateCurrentUserSignature() {
+  if (!currentUser || currentUser.signatureUrl) return;
+  google.script.run
+    .withSuccessHandler(users => {
+      const u = (users || []).find(x => String(x.name || '').trim() === String(currentUser.name || '').trim());
+      if (!u) return;
+      currentUser.signatureUrl = u.signatureUrl || '';
+      sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+    })
+    .withFailureHandler(() => {})
+    .getUsers();
+}
+
+function logout() {
+  confirmAction('คุณต้องการออกจากระบบ?', () => {
+    currentUser = null;
+    sessionStorage.removeItem('currentUser');
+    document.getElementById('mainApp').classList.add('d-none');
+    document.getElementById('loginPage').classList.remove('d-none');
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
+  });
+}
+
+// ── NAVIGATION ──
+function navigateTo(page) {
+  document.querySelectorAll('[id^=page-]').forEach(el => el.classList.add('d-none'));
+  document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
+  const pageEl = document.getElementById(`page-${page}`);
+  if (pageEl) pageEl.classList.remove('d-none');
+  const navEl = document.querySelector(`.sidebar-nav-item[data-page="${page}"]`);
+  if (navEl) navEl.classList.add('active');
+  closeSidebar();
+  switch (page) {
+    case 'dashboard': loadDashboard(); break;
+    case 'repairs': loadRepairs(); break;
+    case 'po': loadPOs(); break;
+    case 'stock': loadStock(); break;
+    case 'shops': loadShops(); break;
+    case 'buses': loadBuses(); break;
+    case 'users': loadUsers(); break;
+    case 'settings': loadSettings(); break;
+    case 'summary' : loadSummary(); break;
+    case 'oiltemplate': loadOilTemplate(); break;
+  }
+}
+
+// ── SIDEBAR TOGGLE ──
+document.getElementById('sidebarToggle').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('show');
+  document.getElementById('sidebarOverlay').classList.toggle('show');
+});
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('show');
+  document.getElementById('sidebarOverlay').classList.remove('show');
+}
+
+// ── UTILITIES ──
+function formatDate(d) {
+  if (!d) return '—';
+  try { const dt = new Date(d); return `${dt.getDate().toString().padStart(2,'0')}/${(dt.getMonth()+1).toString().padStart(2,'0')}/${dt.getFullYear()+543}`; }
+  catch { return d; }
+}
+function todayISO() { return new Date().toISOString().split('T')[0]; }
+function fmtNum(n) { return parseFloat(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+function statusBadge(status) {
+  const map = {
+    // Repair
+    'รอดำเนินการ'   : 'status-waiting',
+    'กำลังซ่อม'     : 'status-inprogress',
+    'รออะไหล่'      : 'status-waiting-parts',
+    'เสร็จแล้ว'     : 'status-done',
+    // PO
+    'รออนุมัติ'     : 'status-waiting-parts',
+    'อนุมัติแล้ว'   : 'status-approved',
+    'รับของแล้ว'    : 'status-done',
+    // legacy
+    'รอซ่อม'        : 'status-waiting',
+    'อนุมัติซ่อม'   : 'status-approved',
+    'กำลังดำเนินการ' : 'status-inprogress',
+    'ออกPO'         : 'status-waiting',
+    'อนุมัติ'       : 'status-approved',
+    'รับอะไหล่แล้ว' : 'status-done'
+  };
+  const icon = {
+    // Repair
+    'รอดำเนินการ'   : 'clock',
+    'กำลังซ่อม'     : 'gear',
+    'รออะไหล่'      : 'box',
+    'เสร็จแล้ว'     : 'check-circle',
+    // PO
+    'รออนุมัติ'     : 'hourglass',
+    'อนุมัติแล้ว'   : 'check',
+    'รับของแล้ว'    : 'box-seam',
+    // legacy
+    'รอซ่อม'        : 'clock',
+    'อนุมัติซ่อม'   : 'check',
+    'กำลังดำเนินการ' : 'gear',
+    'ออกPO'         : 'file',
+    'อนุมัติ'       : 'check',
+    'รับอะไหล่แล้ว' : 'check-circle'
+  };
+  const cls = map[status] || 'status-waiting-parts';
+  const ico = icon[status] || 'question';
+  return `<span class="badge-status ${cls}"><i class="bi bi-${ico}"></i>${status}</span>`;
+}
+
+// ── DASHBOARD ──
+function loadDashboard() {
+  // clock
+  const updateClock = () => {
+    const now = new Date();
+    document.getElementById('dashDatetime').textContent =
+      now.toLocaleDateString('th-TH', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
+      + ' ' + now.toLocaleTimeString('th-TH');
+  };
+  updateClock();
+  setInterval(updateClock, 1000);
+  loadWeeklySummary(0);
+
+  // repairs
+  google.script.run.withSuccessHandler(repairs => {
+    allRepairs = repairs || [];
+
+    const waiting      = repairs.filter(r => r.status === 'รอดำเนินการ');
+    const inProgress   = repairs.filter(r => r.status === 'กำลังซ่อม');
+    const waitingParts = repairs.filter(r => r.status === 'รออะไหล่');
+    const pending      = repairs.filter(r => r.status !== 'เสร็จแล้ว');
+
+    document.getElementById('dashWaiting').textContent      = waiting.length;
+    document.getElementById('dashInProgress').textContent   = inProgress.length;
+    document.getElementById('dashWaitingParts').textContent = waitingParts.length;
+    document.getElementById('dashPendingCount').textContent = pending.length + ' รายการ';
+
+    // แสดงเฉพาะงานที่ยังไม่เสร็จ เรียงวันที่ใหม่สุดก่อน
+    const tbody = document.getElementById('dashRecentRepairs');
+    tbody.innerHTML = pending.length
+      ? pending
+          .sort((a,b) => new Date(b.date) - new Date(a.date))
+          .slice(0, 8)
+          .map(r => `
+            <tr>
+              <td>
+                <a href="#" onclick="editRepair('${r.repairNo}')"
+                  class="text-decoration-none fw-semibold">
+                  ${r.repairNo}
+                </a>
+              </td>
+              <td>${r.plate}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>${formatDate(r.date)}</td>
+            </tr>`).join('')
+      : `<tr><td colspan="4" class="text-center text-muted py-4">
+           <i class="bi bi-check-circle text-success d-block mb-1 fs-5"></i>
+           ไม่มีงานค้าง
+         </td></tr>`;
+  }).getRepairs();
+
+  // PO รออนุมัติ
+  google.script.run.withSuccessHandler(pos => {
+    allPOs = pos || [];
+    const pending = pos.filter(p => p.status === 'รออนุมัติ');
+    document.getElementById('dashPOPending').textContent = pending.length;
+  }).getPOs();
+
+  // stock + expiry
+  google.script.run.withSuccessHandler(stock => {
+    allStock = stock || [];
+    const low = stock.filter(s =>
+      parseFloat(s.qty) <= parseFloat(s.minQty) && parseFloat(s.minQty) > 0
+    );
+    document.getElementById('dashLowStock').innerHTML = low.length
+      ? low.slice(0,5).map(s => `
+          <div class="d-flex justify-content-between align-items-center
+                       py-2 border-bottom" style="font-size:13px">
+            <span>${s.partName}</span>
+            <span class="badge"
+              style="background:rgba(192,80,80,0.15);color:var(--claude-danger)">
+              เหลือ ${s.qty} ${s.unit}
+            </span>
+          </div>`).join('')
+      : `<div class="text-muted text-center py-2 small">
+           <i class="bi bi-check-circle text-success me-1"></i>อะไหล่เพียงพอทั้งหมด
+         </div>`;
+  }).getStock();
+
+  // รถใกล้หมดอายุ
+  google.script.run.withSuccessHandler(buses => {
+    allBuses = buses || [];
+    const today = new Date();
+    const alerts = [];
+
+    buses.forEach(b => {
+      [
+        { label: 'ทะเบียน', date: b.regExpiry },
+        { label: 'ประกัน',  date: b.insuranceExpiry }
+      ].forEach(({ label, date }) => {
+        if (!date) return;
+        const diff = Math.ceil((new Date(date) - today) / 86400000);
+        if (diff <= 60) {
+          alerts.push({ plate: b.plate, label, diff, date });
+        }
+      });
+    });
+
+    alerts.sort((a,b) => a.diff - b.diff);
+
+    document.getElementById('dashExpiryAlert').innerHTML = alerts.length
+      ? alerts.slice(0,5).map(a => {
+          const color = a.diff < 0
+            ? 'var(--claude-danger)'
+            : a.diff <= 30 ? 'var(--claude-warning)' : 'var(--claude-text-muted)';
+          const label = a.diff < 0
+            ? `หมดอายุแล้ว ${Math.abs(a.diff)} วัน`
+            : `อีก ${a.diff} วัน`;
+          return `
+            <div class="d-flex justify-content-between align-items-center
+                         py-2 border-bottom" style="font-size:13px">
+              <span>
+                <span class="fw-semibold">${a.plate}</span>
+                <span class="text-muted ms-1">(${a.label})</span>
+              </span>
+              <span style="color:${color};font-size:12px;font-weight:600">
+                ${label}
+              </span>
+            </div>`;
+        }).join('')
+      : `<div class="text-muted text-center py-2 small">
+           <i class="bi bi-check-circle text-success me-1"></i>ไม่มีรายการใกล้หมดอายุ
+         </div>`;
+  }).getFullBuses();
+}
+
+
+// ── WEEKLY SUMMARY ──
+
+
+function loadWeeklySummary(offset) {
+  _weekOffset = (offset === undefined) ? _weekOffset : offset;
+
+  // ปิด/เปิดปุ่ม next ถ้าเป็นสัปดาห์ปัจจุบัน
+  const nextBtn = document.getElementById('weekNextBtn');
+  if (nextBtn) nextBtn.disabled = _weekOffset >= 0;
+
+  google.script.run
+    .withSuccessHandler(data => {
+      if (!data.success) return;
+      _weeklyData = data;
+      _renderWeeklySummary(data);
+    })
+    .withFailureHandler(e => console.warn('Weekly summary error:', e.message))
+    .getWeeklySummary(_weekOffset);
+}
+
+function shiftWeek(offsetOrDelta) {
+  // ถ้าเรียก shiftWeek(0) = reset, shiftWeek(-1)/shiftWeek(1) = เลื่อน
+  if (offsetOrDelta === 0) {
+    _weekOffset = 0;
+  } else {
+    _weekOffset += offsetOrDelta;
+    if (_weekOffset > 0) _weekOffset = 0; // ไม่ให้เลื่อนไปอนาคต
+  }
+  loadWeeklySummary();
+}
+
+function _renderWeeklySummary(data) {
+  // Label สัปดาห์
+  const labelEl = document.getElementById('weeklyLabel');
+  if (labelEl) {
+    labelEl.textContent = data.weekLabel +
+      (data.weekOffset === 0 ? ' (สัปดาห์นี้)' :
+       data.weekOffset === -1 ? ' (สัปดาห์ที่แล้ว)' :
+       ` (${Math.abs(data.weekOffset)} สัปดาห์ก่อน)`);
+  }
+
+  // Stat numbers
+  _setTxt('wkOpened',  data.openedCount);
+  _setTxt('wkDone',    data.doneCount);
+  _setTxt('wkPending', data.pendingCount);
+  _setTxt('wkCarry',   data.carryOverCount);
+
+  // เปลี่ยนสีตาม pendingCount
+  const pendEl = document.getElementById('wkPending');
+  if (pendEl) {
+    pendEl.style.color = data.pendingCount > 10
+      ? 'var(--claude-danger)'
+      : data.pendingCount > 5
+        ? 'var(--claude-warning)'
+        : 'var(--claude-secondary)';
+  }
+
+  // Extra section (top plates + by status)
+  const extra = document.getElementById('weeklyExtra');
+  if (extra) extra.style.removeProperty('display');
+
+  // Top Plates
+  const plateEl = document.getElementById('wkTopPlates');
+  if (plateEl) {
+    plateEl.innerHTML = data.topPlates.length
+      ? data.topPlates.map((p, i) => `
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span style="width:20px;height:20px;border-radius:50%;
+                         background:var(--claude-primary);color:white;
+                         display:flex;align-items:center;justify-content:center;
+                         font-size:11px;font-weight:700;flex-shrink:0">${i+1}</span>
+            <span class="fw-semibold" style="font-size:13px">${p.plate}</span>
+            <span class="badge rounded-pill"
+              style="background:rgba(217,119,87,.15);color:var(--claude-primary);
+                     font-size:11px;margin-left:auto">
+              ${p.count} งาน
+            </span>
+          </div>`).join('')
+      : '<span class="text-muted small">ไม่มีงานเปิดสัปดาห์นี้</span>';
+  }
+
+  // By Status
+  const statusEl = document.getElementById('wkByStatus');
+  if (statusEl) {
+    const entries = Object.entries(data.byStatus);
+    statusEl.innerHTML = entries.length
+      ? entries.map(([st, cnt]) => `
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            ${statusBadge(st)}
+            <span class="fw-bold" style="font-size:13px">${cnt} งาน</span>
+          </div>`).join('')
+      : '<span class="text-muted small">ไม่มีงานค้าง 🎉</span>';
+  }
+}
+
+function _setTxt(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function openWeeklyModal() {
+  if (!_weeklyData) return;
+  const data = _weeklyData;
+
+  document.getElementById('weeklyModalLabel').textContent = data.weekLabel;
+
+  const today = new Date();
+  const tbody = document.getElementById('weeklyModalBody');
+  const count = data.pendingDetails.length;
+
+  document.getElementById('weeklyModalCount').textContent =
+    `งานค้างทั้งหมด ${count} รายการ`;
+
+  tbody.innerHTML = count
+    ? data.pendingDetails.map(r => {
+        const diffDays = Math.ceil(
+          (today - new Date(r.createdAt || r.date)) / 86400000
+        );
+        const ageColor = diffDays > 14
+          ? 'var(--claude-danger)'
+          : diffDays > 7
+            ? 'var(--claude-warning)'
+            : 'var(--claude-text-muted)';
+        return `<tr>
+          <td>
+            <a href="#" onclick="closeWeeklyAndEdit('${r.repairNo}')"
+               class="fw-semibold text-decoration-none"
+               style="color:var(--claude-primary)">
+              ${r.repairNo}
+            </a>
+          </td>
+          <td>${formatDate(r.date)}</td>
+          <td>
+            <span class="badge"
+              style="background:rgba(61,79,107,.12);color:var(--claude-secondary)">
+              ${r.plate}
+            </span>
+          </td>
+          <td style="max-width:200px;overflow:hidden;
+                     text-overflow:ellipsis;white-space:nowrap"
+              title="${r.repairList}">
+            ${r.repairList}
+          </td>
+          <td>${statusBadge(r.status)}</td>
+          <td style="font-weight:600;color:${ageColor}">
+            ${diffDays} วัน
+          </td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="6">
+         <div class="empty-state" style="padding:32px">
+           <i class="bi bi-check-circle text-success d-block mb-2 fs-3"></i>
+           ไม่มีงานค้าง 🎉
+         </div>
+       </td></tr>`;
+
+  new bootstrap.Modal(document.getElementById('weeklyModal')).show();
+}
+
+function closeWeeklyAndEdit(repairNo) {
+  bootstrap.Modal.getInstance(document.getElementById('weeklyModal'))?.hide();
+  setTimeout(() => editRepair(repairNo), 300);
+}
+
+// ── SUMMARY ──
+function loadSummary(showLoad = false) {
+  const loadBusesPromise = new Promise(resolve => {
+    if (allBuses.length) { resolve(); return; }
+    google.script.run
+      .withSuccessHandler(buses => { allBuses = buses || []; resolve(); })
+      .withFailureHandler(() => resolve())
+      .getBusPlates();
+  });
+
+  const loadShopsPromise = new Promise(resolve => {
+    if (allShops.length) { resolve(); return; }
+    google.script.run
+      .withSuccessHandler(shops => { allShops = shops || []; resolve(); })
+      .withFailureHandler(() => resolve())
+      .getShops();
+  });
+
+  Promise.all([loadBusesPromise, loadShopsPromise]).then(() => {
+    _doLoadSummary(showLoad);
+  });
+}
+
+function _doLoadSummary(showLoad = false) {
+  const filter = {
+    from     : document.getElementById('sumFrom').value  || null,
+    to       : document.getElementById('sumTo').value    || null,
+    plate    : document.getElementById('sumPlate').value || null,
+    shopName : document.getElementById('sumShop').value  || null
+  };
+
+  if (showLoad) showLoading('กำลังโหลดข้อมูล...'); // ← แสดงเฉพาะเมื่อสั่ง
+
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (!res.success) { showToast('error', res.message); return; }
+      renderSummary(res);
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .getExpenseSummary(filter);
+}
+
+function renderSummary(data) {
+  const grandTotal = data.total;
+
+  // Stat cards
+  document.getElementById('sumTotal').textContent = fmtNum(grandTotal);
+  document.getElementById('sumCount').textContent = data.count;
+  document.getElementById('sumTopPlate').textContent =
+    data.byPlate[0]?.plate || '—';
+  document.getElementById('sumTopShop').textContent =
+    data.byShop[0]?.shop   || '—';
+
+  // แยกตามรถ
+  document.getElementById('sumByPlateBody').innerHTML = data.byPlate.length
+    ? data.byPlate.map(r => {
+        const pct = grandTotal > 0 ? (r.total / grandTotal * 100).toFixed(1) : 0;
+        return `<tr>
+          <td class="fw-semibold">${r.plate}</td>
+          <td class="text-end">${fmtNum(r.total)}</td>
+          <td style="min-width:100px">
+            <div class="d-flex align-items-center gap-2">
+              <div style="flex:1;height:6px;background:var(--claude-border);border-radius:3px">
+                <div style="width:${pct}%;height:100%;background:var(--claude-primary);border-radius:3px"></div>
+              </div>
+              <span class="text-muted" style="font-size:11px;width:36px">${pct}%</span>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="3" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+
+  // แยกตามร้านค้า
+  document.getElementById('sumByShopBody').innerHTML = data.byShop.length
+    ? data.byShop.map(r => {
+        const pct = grandTotal > 0 ? (r.total / grandTotal * 100).toFixed(1) : 0;
+        return `<tr>
+          <td class="fw-semibold">${r.shop}</td>
+          <td class="text-end">${fmtNum(r.total)}</td>
+          <td style="min-width:100px">
+            <div class="d-flex align-items-center gap-2">
+              <div style="flex:1;height:6px;background:var(--claude-border);border-radius:3px">
+                <div style="width:${pct}%;height:100%;background:var(--claude-warning);border-radius:3px"></div>
+              </div>
+              <span class="text-muted" style="font-size:11px;width:36px">${pct}%</span>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="3" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+
+  // รายละเอียด
+  document.getElementById('sumDetailBody').innerHTML = data.detail.length
+    ? data.detail.map(p => `
+        <tr>
+          <td>
+            <a href="#" onclick="editPO('${p.poNo}')" class="fw-semibold text-decoration-none">
+              ${p.poNo}
+            </a>
+          </td>
+          <td>${formatDate(p.issueDate)}</td>
+          <td>${p.plate}</td>
+          <td>${p.shopName}</td>
+          <td class="text-muted">${p.refRepairNo || '—'}</td>
+          <td class="text-end fw-semibold">${fmtNum(p.total)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+}
+
+function setQuickFilter(period) {
+  const now = new Date();
+  let from, to = now.toISOString().split('T')[0];
+  if (period === 'month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  } else if (period === 'quarter') {
+    const q = Math.floor(now.getMonth() / 3);
+    from = new Date(now.getFullYear(), q * 3, 1).toISOString().split('T')[0];
+  } else if (period === 'year') {
+    from = `${now.getFullYear()}-01-01`;
+  }
+  document.getElementById('sumFrom').value = from;
+  document.getElementById('sumTo').value   = to;
+  loadSummary(true);
+}
+
+function resetSummaryFilter() {
+  ['sumFrom','sumTo','sumPlate','sumShop'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  loadSummary(true); // ← true
+}
+
+
+// ── REPAIRS ──
+function loadRepairs() {
+  showRepairList();
+  google.script.run.withSuccessHandler(r => {
+    allRepairs = r || [];
+    renderRepairTable(allRepairs);
+  }).getRepairs();
+  loadBusPlates();
+}
+
+function renderRepairTable(repairs) {
+  const tbody = document.getElementById('repairTableBody');
+  tbody.closest('table').classList.add('table-card-mobile');
+  repairs = [...repairs].sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!repairs.length) {
+    tbody.innerHTML = `<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-tools"></i>ยังไม่มีรายการซ่อม</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = repairs.map(r => {
+    const oilBadge = r.oilProgram ? `<span class="badge-status status-waiting" style="font-size:11px"><i class="bi bi-droplet-fill me-1"></i>${r.oilProgram}</span>` : '<span class="text-muted small">—</span>';
+    return `<tr>
+      <td data-label="เลขที่"><span class="fw-semibold" style="color:var(--claude-primary)">${r.repairNo}</span></td>
+      <td data-label="วันที่">${formatDate(r.date)}</td>
+      <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${r.plate}</span></td>
+      <td data-label="โปรแกรมน้ำมัน">${oilBadge}</td>
+      <td data-label="รายการซ่อม" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.repairList}">${r.repairList}</td>
+      <td data-label="สถานะ">${statusBadge(r.status)}</td>
+      <td data-label="">
+        <div class="d-flex gap-1 justify-content-end">
+          <button class="btn btn-sm btn-outline-primary" onclick="editRepair('${r.repairNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
+          ${r.status === 'รออะไหล่' ? `<button class="btn btn-sm btn-info" onclick="createPOFromRepairNo('${r.repairNo}','${r.plate}')" title="สร้าง PO"><i class="bi bi-file-earmark-plus"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deleteRepair('${r.repairNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterRepairs() {
+  const q = document.getElementById('repairSearch').value.toLowerCase();
+  const s = document.getElementById('repairStatusFilter').value;
+  renderRepairTable(allRepairs.filter(r =>
+    (!q || r.repairNo.toLowerCase().includes(q) || r.plate.toLowerCase().includes(q)) &&
+    (!s || r.status === s)
+  ));
+}
+
+function showRepairList() {
+  document.getElementById('repairListView').classList.remove('d-none');
+  document.getElementById('repairFormView').classList.add('d-none');
+}
+
+function showRepairForm(repair = null) {
+  document.getElementById('repairListView').classList.add('d-none');
+  document.getElementById('repairFormView').classList.remove('d-none');
+  repairPartRows = [];
+
+  if (repair) {
+    document.getElementById('repairFormTitle').textContent = 'แก้ไขการแจ้งซ่อม';
+    document.getElementById('repairFormBreadcrumb').textContent = repair.repairNo;
+    document.getElementById('editRepairNo').value = repair.repairNo;
+    document.getElementById('repairNo').value = repair.repairNo;
+    document.getElementById('repairDate').value = repair.date;
+    document.getElementById('repairPlate').value = repair.plate;
+    document.getElementById('repairChassis').value = repair.chassis || '';
+    document.getElementById('repairMileage').value = repair.mileage || '';
+    document.getElementById('repairOilProgram').value = repair.oilProgram || '';
+    document.getElementById('repairList').value = repair.repairList || '';
+    document.getElementById('repairSummary').value = repair.repairSummary || '';
+
+    // Show status card
+    document.getElementById('repairStatusCard').style.cssText = '';
+    renderRepairStepper(repair.status);
+    if (repair.status === 'รออะไหล่') document.getElementById('createPOBtn').style.display = '';
+
+    // Load parts
+    google.script.run.withSuccessHandler(parts => {
+      repairPartRows = parts.map(p => ({ partName: p.partName, qty: p.qty }));
+      renderRepairParts();
+    }).getRepairParts(repair.repairNo);
+  } else {
+    document.getElementById('repairFormTitle').textContent = 'แจ้งซ่อมใหม่';
+    document.getElementById('repairFormBreadcrumb').textContent = 'ใหม่';
+    document.getElementById('editRepairNo').value = '';
+    document.getElementById('repairNo').value = '';
+    document.getElementById('repairDate').value = todayISO();
+    document.getElementById('repairPlate').value = '';
+    document.getElementById('repairChassis').value = '';
+    document.getElementById('repairMileage').value = '';
+    document.getElementById('repairOilProgram').value = '';
+    document.getElementById('repairList').value = '';
+    document.getElementById('repairSummary').value = '';
+    document.getElementById('repairStatusCard').style.display = 'none';
+    renderRepairParts();
+  }
+}
+
+function editRepair(repairNo) {
+  navigateTo('repairs');
+  setTimeout(() => {
+    const r = allRepairs.find(x => x.repairNo === repairNo);
+    if (r) showRepairForm(r);
+  }, 300);
+}
+
+function renderRepairStepper(currentStatus) {
+  const steps = ['รอดำเนินการ', 'กำลังซ่อม', 'รออะไหล่', 'เสร็จแล้ว'];
+  const icons = ['clock', 'gear', 'box', 'check-circle'];
+  const curIdx = steps.indexOf(currentStatus);
+  document.getElementById('repairStepperForm').innerHTML = steps.map((s, i) => {
+    const cls = i < curIdx ? 'completed' : i === curIdx ? 'active' : '';
+    return `<div class="step-item ${cls}">
+      <div class="step-circle"><i class="bi bi-${i < curIdx ? 'check-lg' : icons[i]}"></i></div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join('');
+}
+
+function addRepairPart() {
+  repairPartRows.push({ partName: '', qty: 1 });
+  renderRepairParts();
+}
+
+function removeRepairPart(idx) {
+  repairPartRows.splice(idx, 1);
+  renderRepairParts();
+}
+
+function renderRepairParts() {
+  const tbody = document.getElementById('repairPartsBody');
+  if (!repairPartRows.length) {
+    tbody.innerHTML = '<tr id="repairPartsEmpty"><td colspan="4" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td></tr>';
+    return;
+  }
+  tbody.innerHTML = repairPartRows.map((p, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td>
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control" value="${p.partName || ''}" onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
+          <button class="btn btn-outline-secondary" onclick="openPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
+        </div>
+      </td>
+      <td><span class="text-muted small">${p.partCode || ''}</span></td>
+      <td><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
+      <td><button class="btn btn-sm btn-outline-danger" onclick="removeRepairPart(${i})"><i class="bi bi-trash"></i></button></td>
+    </tr>`).join('');
+}
+
+function saveRepair() {
+
+  const repair = {
+    repairNo   : document.getElementById('editRepairNo').value,
+    date       : document.getElementById('repairDate').value,
+    plate      : document.getElementById('repairPlate').value,
+    chassis    : document.getElementById('repairChassis').value,
+    mileage    : document.getElementById('repairMileage').value,
+    oilProgram : document.getElementById('repairOilProgram').value,
+    repairList : document.getElementById('repairList').value,
+    repairSummary :document.getElementById('repairSummary').value,
+    createdBy  : currentUser?.name || ''
+
+  };
+  if (!repair.date || !repair.plate || !repair.repairList) {
+    showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
+    return;
+  }
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success', 'บันทึกข้อมูลเรียบร้อย');
+        loadRepairs();
+        showRepairList();
+        // ── ถามส่ง Line ──
+        Swal.fire({
+          icon : 'success',
+          title: 'บันทึกเรียบร้อย',
+          text : 'ต้องการส่งขออนุมัติเข้า Line กลุ่มหรือไม่?',
+          showCancelButton : true,
+          confirmButtonText: '📲 ส่ง Line',
+          cancelButtonText : 'ไม่ส่ง'
+        }).then(r => {
+          if (r.isConfirmed) {
+            showLoading('กำลังส่ง Line...');
+            google.script.run
+              .withSuccessHandler(lineRes => {
+                Swal.close();
+                showToast(
+                  lineRes.success ? 'success' : 'error',
+                  lineRes.success
+                    ? 'ส่ง Line เรียบร้อย'
+                    : (lineRes.message || 'ส่ง Line ไม่สำเร็จ')
+                );
+              })
+              .withFailureHandler(err => {
+                Swal.close();
+                showToast('error', err.message);
+              })
+              .sendRepairToLine(res.repairNo);
+          }
+        });
+      } else {
+        showToast('error', res.message);
+      }
+    })
+    .withFailureHandler(e => {
+      Swal.close();
+      showToast('error', e.message);
+    })
+    .saveRepair(repair, repairPartRows);
+}
+
+function changeRepairStatus(status) {
+  const repairNo = document.getElementById('editRepairNo').value;
+  if (!repairNo) return;
+  if (status === 'เสร็จแล้ว') {
+  const summary =
+    document.getElementById('repairSummary').value.trim();
+    if (!summary) {
+      showToast(
+        'warning',
+        'กรุณากรอกผลการซ่อมก่อนปิดงาน'
+      );
+      return;
+    }
+  }
+  confirmAction(`เปลี่ยนสถานะเป็น "${status}"?`, () => {
+    showLoading('กำลังอัปเดต...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) {
+          showToast('success', 'อัปเดตสถานะเรียบร้อย');
+          renderRepairStepper(status);
+          document.getElementById('createPOBtn').style.display = status === 'รออะไหล่' ? '' : 'none';
+          const r = allRepairs.find(x => x.repairNo === repairNo);
+          if (r) r.status = status;
+        } else { showToast('error', res.message); }
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .updateRepairStatus(repairNo, status);
+  });
+}
+
+function deleteRepair(repairNo) {
+  confirmAction(`ลบรายการซ่อม ${repairNo}?`, () => {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadRepairs(); }
+        else { showToast('error', res.message); }
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .deleteRepair(repairNo);
+  });
+}
+
+function createPOFromRepair() {
+  const repairNo = document.getElementById('editRepairNo').value;
+  const plate = document.getElementById('repairPlate').value;
+  createPOFromRepairNo(repairNo, plate);
+}
+
+function createPOFromRepairNo(repairNo, plate) {
+  pendingPORepairNo = repairNo;
+  pendingPOPlate    = plate;
+
+  // หา oilProgram จาก repair ที่กำลัง edit อยู่
+  const repair = allRepairs.find(r => r.repairNo === repairNo);
+  const program = repair?.oilProgram || '';
+
+  navigateTo('po');
+
+  setTimeout(() => {
+    showPOForm();
+
+    // ถ้ามีโปรแกรมน้ำมัน ดึง template มาใส่
+    if (program) {
+      showLoading('กำลังโหลด Template น้ำมัน...');
+      google.script.run
+        .withSuccessHandler(templateItems => {
+          Swal.close();
+          if (templateItems.length) {
+            // แปลงเป็น poItemRows format
+            poItemRows = templateItems.map(t => ({
+              partName     : t.partName,
+              qty          : t.qty,
+              unit         : t.unit,
+              pricePerUnit : t.pricePerUnit || 0,
+              discount     : 0,
+              amount       : t.qty * (t.pricePerUnit || 0),
+              note         : ''
+            }));
+            renderPOItems();
+            calcPOTotal();
+            showToast('success', `โหลด Template โปรแกรม ${program} (${templateItems.length} รายการ)`);
+          }
+        })
+        .withFailureHandler(() => Swal.close())
+        .getOilTemplateItems(program, plate);
+    }
+  }, 400);
+}
+
+function onPlateChange() {
+  const plate = document.getElementById('repairPlate').value;
+  const bus = allBuses.find(b => b.plate === plate);
+  if (bus) document.getElementById('repairChassis').value = bus.chassis || '';
+}
+
+// ── PURCHASE ORDERS ──
+function loadPOs() {
+  showPOList();
+  // Load shops for dropdown
+  google.script.run.withSuccessHandler(shops => {
+    allShops = shops || [];
+  }).getShops();
+  google.script.run.withSuccessHandler(pos => {
+    allPOs = pos || [];
+    renderPOTable(allPOs);
+  }).getPOs();
+  loadBusPlates();
+}
+
+function renderPOTable(pos) {
+  const tbody = document.getElementById('poTableBody');
+  tbody.closest('table').classList.add('table-card-mobile');
+  if (!pos.length) {
+    tbody.innerHTML = `<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = pos.map(p => `
+    <tr>
+      <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span></td>
+      <td data-label="ร้านค้า">${p.shopName}</td>
+      <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
+      <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
+      <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
+      <td data-label="สถานะ">${statusBadge(p.status)}</td>
+      <td data-label="">
+        <div class="d-flex gap-1 justify-content-end">
+          <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function filterPOs() {
+  const q = document.getElementById('poSearch').value.toLowerCase();
+  const s = document.getElementById('poStatusFilter').value;
+  renderPOTable(allPOs.filter(p =>
+    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q)) &&
+    (!s || p.status === s)
+  ));
+}
+
+function showPOList() {
+  document.getElementById('poListView').classList.remove('d-none');
+  document.getElementById('poFormView').classList.add('d-none');
+}
+
+function showPOForm(po = null) {
+  document.getElementById('poListView').classList.add('d-none');
+  document.getElementById('poFormView').classList.remove('d-none');
+  poItemRows = [];
+
+  if (po) {
+    document.getElementById('poFormTitle').textContent = 'แก้ไข PO';
+    document.getElementById('poFormBreadcrumb').textContent = po.poNo;
+    document.getElementById('editPONo').value = po.poNo;
+    document.getElementById('poNo').value = po.poNo;
+    document.getElementById('poShopName').value = po.shopName || '';
+    document.getElementById('poShopAddress').value = po.shopAddress || '';
+    document.getElementById('poTaxId').value = po.taxId || '';
+    document.getElementById('poIssueDate').value = po.issueDate || '';
+    document.getElementById('poQuoteDate').value = po.quoteDate || '';
+    document.getElementById('poQuoteNo').value = po.quoteNo || '';
+    document.getElementById('poRefRepairNo').value = po.refRepairNo || '';
+    document.getElementById('poPlate').value = po.plate || '';
+    document.getElementById('poVatType').value = po.vatType || 'none';
+
+    document.getElementById('poStatusCard').style.cssText = '';
+    renderPOStepper(po.status);
+
+    google.script.run.withSuccessHandler(items => {
+      poItemRows = items.map(i => ({ partName: i.partName, qty: i.qty, unit: i.unit, pricePerUnit: i.pricePerUnit, discount: i.discount, amount: i.amount, note: i.note || '' }));
+      renderPOItems();
+      calcPOTotal();
+    }).getPOItems(po.poNo);
+  } else {
+    document.getElementById('poFormTitle').textContent = 'สร้าง PO ใหม่';
+    document.getElementById('poFormBreadcrumb').textContent = 'ใหม่';
+    document.getElementById('editPONo').value = '';
+    document.getElementById('poNo').value = '';
+    document.getElementById('poIssueDate').value = todayISO();
+    document.getElementById('poShopName').value = '';
+    document.getElementById('poShopAddress').value = '';
+    document.getElementById('poTaxId').value = '';
+    document.getElementById('poQuoteDate').value = '';
+    document.getElementById('poQuoteNo').value = '';
+    document.getElementById('poRefRepairNo').value = pendingPORepairNo || '';
+    document.getElementById('poPlate').value = pendingPOPlate || '';
+    document.getElementById('poVatType').value = 'none';
+    document.getElementById('poStatusCard').style.display = 'none';
+    renderPOItems();
+    pendingPORepairNo = null; pendingPOPlate = null;
+  }
+}
+
+function editPO(poNo) {
+  navigateTo('po');
+  setTimeout(() => {
+    const p = allPOs.find(x => x.poNo === poNo);
+    if (p) showPOForm(p);
+  }, 300);
+}
+
+function renderPOStepper(currentStatus) {
+  const steps = ['รออนุมัติ', 'อนุมัติแล้ว', 'รับของแล้ว'];
+  const icons = ['hourglass', 'check', 'check-circle'];
+  const curIdx = steps.indexOf(currentStatus);
+  document.getElementById('poStepperForm').innerHTML = steps.map((s, i) => {
+    const cls = i < curIdx ? 'completed' : i === curIdx ? 'active' : '';
+    return `<div class="step-item ${cls}">
+      <div class="step-circle"><i class="bi bi-${i < curIdx ? 'check-lg' : icons[i]}"></i></div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join('');
+}
+
+function addPOItem() {
+  poItemRows.push({ partName: '', qty: 1, unit: 'ชิ้น', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
+  renderPOItems();
+}
+
+function removePOItem(idx) {
+  poItemRows.splice(idx, 1);
+  renderPOItems();
+  calcPOTotal();
+}
+
+function renderPOItems() {
+  const tbody = document.getElementById('poItemsBody');
+  tbody.closest('table').classList.add('table-card-mobile');
+  if (!poItemRows.length) {
+    tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">ยังไม่มีรายการ</td></tr>';
+    return;
+  }
+  tbody.innerHTML = poItemRows.map((p, i) => `
+    <tr>
+      <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
+      <td data-label="อะไหล่">
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control" value="${p.partName || ''}" onchange="poItemRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
+          <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
+        </div>
+        <input type="text" class="form-control form-control-sm mt-1"
+          value="${p.note || ''}"
+          onchange="poItemRows[${i}].note=this.value"
+          placeholder="📝 หมายเหตุ (เช่น ใช้กับรถ 30-4554)..."
+          style="font-size:11px;color:#6b7280;border-style:dashed">
+      </td>
+      <td data-label="จำนวน">
+        <input type="number" class="form-control form-control-sm" value="${p.qty}" min="0" step="0.01" onchange="poItemRows[${i}].qty=parseFloat(this.value)||0;calcPOItemAmount(${i})">
+      </td>
+      <td data-label="หน่วย">
+        <input type="text" class="form-control form-control-sm" value="${p.unit}" onchange="poItemRows[${i}].unit=this.value">
+      </td>
+      <td data-label="ราคา/หน่วย">
+        <input type="number" class="form-control form-control-sm" value="${p.pricePerUnit}" min="0" step="0.01" onchange="poItemRows[${i}].pricePerUnit=parseFloat(this.value)||0;calcPOItemAmount(${i})">
+      </td>
+      <td data-label="ส่วนลด">
+        <input type="number" class="form-control form-control-sm" value="${p.discount}" min="0" step="0.01" onchange="poItemRows[${i}].discount=parseFloat(this.value)||0;calcPOItemAmount(${i})">
+      </td>
+      <td data-label="จำนวนเงิน">
+        <span id="poAmt_${i}" class="fw-semibold">${fmtNum(p.amount)}</span>
+      </td>
+      <td data-label="">
+        <div class="d-flex justify-content-end">
+          <button class="btn btn-sm btn-outline-danger" onclick="removePOItem(${i})"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function calcPOItemAmount(idx) {
+  const p = poItemRows[idx];
+  p.amount = (p.qty * p.pricePerUnit) - p.discount;
+  const el = document.getElementById(`poAmt_${idx}`);
+  if (el) el.textContent = fmtNum(p.amount);
+  calcPOTotal();
+}
+
+function calcPOTotal() {
+  const subtotal = poItemRows.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+  const vatType = document.getElementById('poVatType').value;
+  let vat = 0, grand = subtotal;
+  if (vatType === 'exclusive') { vat = subtotal * 0.07; grand = subtotal + vat; }
+  else if (vatType === 'inclusive') { vat = subtotal - subtotal / 1.07; grand = subtotal; }
+  document.getElementById('poSubtotal').textContent = fmtNum(vatType === 'inclusive' ? subtotal / 1.07 : subtotal);
+  document.getElementById('poVatAmount').textContent = fmtNum(vat);
+  document.getElementById('poGrandTotal').textContent = fmtNum(grand);
+  document.getElementById('poVatRow').style.display = vatType !== 'none' ? '' : 'none';
+}
+
+function savePO() {
+
+  const po = {
+    poNo         : document.getElementById('editPONo').value,
+    shopName     : document.getElementById('poShopName').value,
+    shopAddress  : document.getElementById('poShopAddress').value,
+    taxId        : document.getElementById('poTaxId').value,
+    issueDate    : document.getElementById('poIssueDate').value,
+    quoteDate    : document.getElementById('poQuoteDate').value,
+    quoteNo      : document.getElementById('poQuoteNo').value,
+    refRepairNo  : document.getElementById('poRefRepairNo').value,
+    plate        : document.getElementById('poPlate').value,
+    vatType      : document.getElementById('poVatType').value,
+    createdBy    : currentUser?.name || '',
+    createdBySignatureUrl : currentUser?.signatureUrl || ''
+  };
+  
+  if (!po.shopName || !po.plate || !po.issueDate) {
+    showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
+    return;
+  }
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    // ใน .withSuccessHandler ของ savePO() แทนที่โค้ดเดิม
+.withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) {
+          showToast('success', 'บันทึก PO เรียบร้อย');
+          loadPOs();
+          showPOList();
+
+          // ── สร้าง PDF อัตโนมัติ ──
+          showLoading('กำลังสร้าง PDF...');
+          google.script.run
+            .withSuccessHandler(pdfRes => {
+              Swal.close();
+              if (pdfRes.success) {
+                showToast('success', 'สร้าง PDF เรียบร้อย');
+              } else {
+                showToast('warning', 'บันทึกแล้ว แต่สร้าง PDF ไม่สำเร็จ: ' + (pdfRes.message||''));
+              }
+
+              // ── ถามส่ง Line (พร้อม pdfUrl) ──
+              Swal.fire({
+                icon: 'success',
+                title: 'บันทึกเรียบร้อย',
+                text: 'ต้องการส่งขออนุมัติเข้า Line กลุ่มหรือไม่?',
+                showCancelButton: true,
+                confirmButtonText: '📲 ส่ง Line',
+                cancelButtonText: 'ไม่ส่ง'
+              }).then(r => {
+                if (r.isConfirmed) {
+                  showLoading('กำลังส่ง Line...');
+                  google.script.run
+                    .withSuccessHandler(lineRes => {
+                      Swal.close();
+                      showToast(
+                        lineRes.success ? 'success' : 'error',
+                        lineRes.success
+                          ? 'ส่ง Line เรียบร้อย'
+                          : (lineRes.message || 'ส่ง Line ไม่สำเร็จ')
+                      );
+                    })
+                    .withFailureHandler(err => {
+                      Swal.close();
+                      showToast('error', err.message);
+                    })
+                    .sendPOToLine(res.poNo);
+                }
+              });
+            })
+            .withFailureHandler(err => {
+              Swal.close();
+              showToast('warning', 'บันทึกแล้ว แต่สร้าง PDF error: ' + err.message);
+              // ยังถามส่ง Line ได้
+            })
+            .generateAndSavePOPdf(res.poNo);
+
+        } else {
+          showToast('error', res.message);
+        }
+      })
+    .savePO(po, poItemRows);
+}
+
+function changePOStatus(status) {
+  const poNo = document.getElementById('editPONo').value;
+  if (!poNo) return;
+
+  if (status === 'รับของแล้ว') {
+    Swal.fire({
+      title: 'ยืนยันรับของ',
+      html: `
+        <div class="text-start px-2">
+          <p class="mb-3" style="font-size:14px">
+            PO นี้มีรายการอะไหล่หรือค่าแรง?
+          </p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="syncStockCheck" checked>
+            <label class="form-check-label fw-semibold" for="syncStockCheck">
+              เพิ่มรายการเข้า Stock และรายการซ่อม
+            </label>
+          </div>
+          <div class="text-muted small ps-4">
+            <i class="bi bi-info-circle me-1"></i>
+            ยกเลิกติ๊กถ้าเป็น PO ค่าแรงเท่านั้น
+          </div>
+        </div>`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'ยืนยันรับของ',
+      cancelButtonText: 'ยกเลิก',
+      preConfirm: () => {return { syncStock: document.getElementById('syncStockCheck').checked };}
+    }).then(result => {
+      if (!result.isConfirmed) return;
+      _doChangePOStatus(poNo, status, result.value.syncStock);
+    });
+
+  } else {
+    confirmAction(`เปลี่ยนสถานะเป็น "${status}"?`, () => {
+      _doChangePOStatus(poNo, status, true);
+    });
+  }
+}
+
+function _doChangePOStatus(poNo, status, syncStock) {
+  showLoading('กำลังอัปเดต...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (!res.success) { showToast('error', res.message); return; }
+
+      showToast('success', 'อัปเดตสถานะเรียบร้อย');
+      renderPOStepper(status);
+
+      if (status === 'อนุมัติแล้ว') {
+        showLoading('กำลังสร้าง PDF พร้อมลายเซ็น...');
+        google.script.run
+          .withSuccessHandler(pdfRes => {
+            Swal.close();
+            showToast(
+              pdfRes.success ? 'success' : 'warning',
+              pdfRes.success ? 'บันทึก PDF พร้อมลายเซ็นแล้ว' : 'อัปเดตสถานะแล้ว แต่ PDF ไม่สำเร็จ'
+            );
+          })
+          .withFailureHandler(() => Swal.close())
+          .generateAndSavePOPdf(poNo);
+      }
+
+      const p = allPOs.find(x => x.poNo === poNo);
+      if (p) p.status = status;
+
+      if (status === 'รับของแล้ว') {
+        const refRepairNo = document.getElementById('poRefRepairNo').value;
+        if (syncStock && refRepairNo) {
+          Swal.fire({
+            icon: 'success',
+            title: 'รับของเรียบร้อย',
+            html: `อะไหล่จาก PO <b>${poNo}</b><br>
+                   ถูกเพิ่มเข้า Stock และรายการซ่อม <b>${refRepairNo}</b> แล้ว`,
+            confirmButtonText: 'ดูรายการซ่อม',
+            showCancelButton: true,
+            cancelButtonText: 'ปิด'
+          }).then(r => { if (r.isConfirmed) editRepair(refRepairNo); });
+        } else if (!syncStock) {
+          showToast('info', 'รับของแล้ว (ไม่บันทึกลง Stock เนื่องจากเป็นค่าแรง)');
+        }
+      }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .updatePOStatus(poNo, status, currentUser.name, syncStock);
+}
+
+function deletePO(poNo) {
+  confirmAction(`ลบ PO ${poNo}?`, () => {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadPOs(); }
+        else { showToast('error', res.message); }
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .deletePO(poNo);
+  });
+}
+
+function previewPO() {
+  showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
+  const poNo = document.getElementById('editPONo').value;
+  const existingPO = allPOs.find(p => p.poNo === poNo) || {};
+  const po = {
+    poNo        : poNo || 'PREVIEW',
+    shopName    : document.getElementById('poShopName').value,
+    shopAddress : document.getElementById('poShopAddress').value,
+    taxId       : document.getElementById('poTaxId').value,
+    issueDate   : document.getElementById('poIssueDate').value,
+    quoteNo     : document.getElementById('poQuoteNo').value,
+    quoteDate   : document.getElementById('poQuoteDate').value,
+    refRepairNo : document.getElementById('poRefRepairNo').value,
+    plate       : document.getElementById('poPlate').value,
+    vatType     : document.getElementById('poVatType').value,
+    createdBy   : currentUser?.name || '',
+    createdBySignatureUrl : existingPO.createdBySignatureUrl || currentUser?.signatureUrl || '',
+    approvedBy  : existingPO.approvedBy || '' 
+  };
+  google.script.run
+    .withSuccessHandler(settings => {
+      Swal.close();
+      renderPrintPreview(po, poItemRows, settings, po.approvedBy ? (existingPO.approvedBySignatureUrl || '') : '');
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .getAllSettings();
+}
+
+
+function previewPOFromNo(poNo) {
+  const po = allPOs.find(p => p.poNo === poNo);
+  if (!po) return;
+  showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
+  google.script.run
+    .withSuccessHandler(result => {
+      Swal.close();
+      if (!result) { showToast('error', 'ไม่พบข้อมูล PO'); return; }
+      renderPrintPreview(result.po, result.items, result.settings, result.sigUrl);
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .getPOForPrint(poNo);
+}
+
+// ── แปลง settings array → object ──
+function _settingsToObj(arr) {
+  const o = {};
+  (arr || []).forEach(s => { o[s.key] = s.value; });
+  return o;
+}
+
+function renderPrintPreview(po, items, settingsArr, sigUrl) {
+  const s       = Array.isArray(settingsArr) ? _settingsToObj(settingsArr) : (settingsArr || {});
+  const vatType = po.vatType || 'none';
+  const subtotal = items.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0);
+  let vat = 0, grand = subtotal;
+  if (vatType === 'exclusive') { vat = subtotal * 0.07; grand = subtotal + vat; }
+  else if (vatType === 'inclusive') { vat = subtotal - subtotal / 1.07; grand = subtotal; }
+  const preVat = vatType === 'inclusive' ? subtotal / 1.07 : subtotal;
+
+  const logoHtml = s.COMPANY_LOGO
+    ? `<img src="${s.COMPANY_LOGO}" style="width:120px;height:120px;object-fit:contain;border-radius:50%;border:2px solid rgba(255,255,255,0.4)">`
+    : `<div style="width:120px;height:120px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;color:#1a3a5c;text-align:center;font-weight:700">LOGO<br>บริษัท</div>`;
+
+  const stampHtml = s.COMPANY_STAMP
+    ? `<img src="${s.COMPANY_STAMP}" style="width:100px;height:100px;object-fit:contain;opacity:0.9">`
+    : `<div style="width:100px;height:100px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#bbb;text-align:center;background:#fafafa">ตรา<br>ประทับ</div>`;
+
+  // ── แบ่ง items เป็น chunk หน้าละ 15 ──
+  const ROWS_PER_PAGE = 15;
+  const chunks = [];
+  for (let i = 0; i < Math.max(items.length, 1); i += ROWS_PER_PAGE) {
+    chunks.push(items.slice(i, i + ROWS_PER_PAGE));
+  }
+  const totalPages = chunks.length;
+
+  // ── Header บริษัท (ทุกหน้า) ──
+  function renderHeader(pageNum) {
+    return `
+    <div style="display:flex;align-items:stretch;border-bottom:3px solid #1a3a5c">
+      <div style="width:110px;display:flex;align-items:center;justify-content:center;padding:14px;flex-shrink:0">
+        ${logoHtml}
+      </div>
+      <div style="flex:1;padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#1a3a5c">${s.COMPANY_NAME_EN || 'COMPANY NAME CO., LTD.'}</div>
+          <div style="font-size:11px;color:#555;margin-top:2px">${s.COMPANY_ADDRESS_EN || ''}</div>
+          <div style="font-size:11px;color:#555">Tel: ${s.COMPANY_TEL || ''} &nbsp;|&nbsp; Fax: ${s.COMPANY_FAX || ''}</div>
+          <div style="font-size:11px;color:#555">TAX ID: ${s.COMPANY_TAX_ID || ''}</div>
+          <div style="margin-top:6px;padding-top:6px;border-top:1px solid #ddd">
+            <div style="font-size:12px;font-weight:700;color:#1a3a5c">${s.COMPANY_NAME_TH || ''}</div>
+            <div style="font-size:11px;color:#555">${s.COMPANY_ADDRESS_TH || ''}</div>
+            <div style="font-size:11px;color:#555">โทร: ${s.COMPANY_TEL || ''} &nbsp;|&nbsp; แฟกซ์: ${s.COMPANY_FAX || ''}</div>
+          </div>
+        </div>
+        <div style="text-align:right;min-width:180px;flex-shrink:0">
+          <div style="background:#1a3a5c;color:#fff;padding:6px 14px;text-align:center;margin-bottom:8px">
+            <div style="font-size:15px;font-weight:700;letter-spacing:2px">ใบสั่งซื้อ</div>
+            <div style="font-size:10px;letter-spacing:3px;opacity:0.85">PURCHASE ORDER</div>
+          </div>
+          <table style="width:100%;font-size:11px;border-collapse:collapse">
+            <tr>
+              <td style="text-align:right;padding:2px 6px 2px 0;color:#555">เลขที่ :</td>
+              <td style="border-bottom:1px solid #000;text-align:center;font-weight:700;padding:2px 4px">${po.poNo}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:2px 6px 2px 0;color:#555">วันที่ :</td>
+              <td style="border-bottom:1px solid #000;text-align:center;padding:2px 4px">${formatDate(po.issueDate)}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:2px 6px 2px 0;color:#555">หน้า :</td>
+              <td style="border-bottom:1px solid #000;text-align:center;padding:2px 4px">${pageNum} / ${totalPages}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ── Supplier + Quote (หน้าแรกเท่านั้น) ──
+  function renderSupplier() {
+    return `
+    <div style="display:flex;border-bottom:1px solid #ccc;font-size:11px">
+      <div style="flex:1;padding:10px 14px;border-right:1px solid #ccc">
+        <div style="font-size:10px;font-weight:700;color:#1a3a5c;letter-spacing:0.5px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #e8e8e8">ข้อมูลผู้ขาย / VENDOR</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="color:#888;width:85px;padding:2px 0">ชื่อผู้ขาย</td><td style="font-weight:600;border-bottom:1px solid #f0f0f0;padding:2px 4px">${po.shopName || ''}</td></tr>
+          <tr><td style="color:#888;padding:2px 0;vertical-align:top">ที่อยู่</td><td style="border-bottom:1px solid #f0f0f0;padding:2px 4px">${po.shopAddress || ''}</td></tr>
+          <tr><td style="color:#888;padding:2px 0">เลขผู้เสียภาษี</td><td style="border-bottom:1px solid #f0f0f0;padding:2px 4px">${po.taxId || ''}</td></tr>
+        </table>
+      </div>
+      <div style="width:220px;padding:10px 14px;flex-shrink:0">
+        <div style="font-size:10px;font-weight:700;color:#1a3a5c;letter-spacing:0.5px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #e8e8e8">อ้างอิงใบเสนอราคา</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="color:#888;padding:2px 0;width:85px">เลขที่ใบเสนอ</td><td style="border-bottom:1px solid #f0f0f0;padding:2px 4px">${po.quoteNo || ''}</td></tr>
+          <tr><td style="color:#888;padding:2px 0">วันที่ใบเสนอ</td><td style="border-bottom:1px solid #f0f0f0;padding:2px 4px">${po.quoteDate ? formatDate(po.quoteDate) : ''}</td></tr>
+          <tr><td style="color:#888;padding:2px 0">กำหนดส่ง</td><td style="border-bottom:1px solid #f0f0f0;padding:2px 4px"></td></tr>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  // ── Table Header ──
+  function renderTableHeader() {
+    return `
+    <div style="background:#f0f4f8;border-bottom:1px solid #ccc;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-align:center;letter-spacing:0.5px">
+      กรุณาจำหน่ายสินค้าตามรายการดังต่อไปนี้
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead>
+        <tr style="background:#1a3a5c;color:#fff">
+          <th style="padding:6px 8px;width:32px;text-align:center;font-weight:600">ลำดับ</th>
+          <th style="padding:6px 8px;text-align:left;font-weight:600">รายละเอียด / สินค้า</th>
+          <th style="padding:6px 8px;width:50px;text-align:center;font-weight:600">จำนวน</th>
+          <th style="padding:6px 8px;width:45px;text-align:center;font-weight:600">หน่วย</th>
+          <th style="padding:6px 8px;width:75px;text-align:center;font-weight:600">ราคา/หน่วย</th>
+          <th style="padding:6px 8px;width:60px;text-align:center;font-weight:600">ส่วนลด</th>
+          <th style="padding:6px 8px;width:80px;text-align:center;font-weight:600">จำนวนเงิน</th>
+        </tr>
+      </thead>`;
+  }
+
+  // ── Rows ──
+  function renderRows(chunk, startIdx, isLastPage) {
+    const rows = [...chunk, null];
+    while (rows.length < ROWS_PER_PAGE) rows.push(null);
+    return rows.map((it, i) => {
+      const globalIdx = startIdx + i;
+      return `
+      <tr style="background:${globalIdx % 2 === 0 ? '#fff' : '#f9fafb'};border-bottom:1px solid #eee">
+        <td style="padding:5px 8px;text-align:center;color:#aaa">${it ? globalIdx + 1 : ''}</td>
+        <td style="padding:5px 8px">${it ? it.partName : ''}</td>
+        <td style="padding:5px 8px;text-align:center">${it ? it.qty : ''}</td>
+        <td style="padding:5px 8px;text-align:center;color:#888">${it ? (it.unit || '') : ''}</td>
+        <td style="padding:5px 8px;text-align:right">${it ? fmtNum(it.pricePerUnit) : ''}</td>
+        <td style="padding:5px 8px;text-align:right;color:#c05050">${it && parseFloat(it.discount) > 0 ? fmtNum(it.discount) : (it ? '-' : '')}</td>
+        <td style="padding:5px 8px;text-align:right;font-weight:600">${it ? fmtNum(it.amount) : ''}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── Note ──
+  function renderNotes(items) {
+    const noted = items
+      .map((it, i) => it.note ? { idx: i + 1, name: it.partName, note: it.note } : null)
+      .filter(Boolean);
+    if (!noted.length) return '';
+    return `
+    <div style="border-top:1px dashed #ccc;padding:6px 14px 4px;font-size:11px">
+      <span style="font-weight:700;color:#1a3a5c">หมายเหตุรายการ : </span>
+      ${noted.map(n => `<span style="margin-right:12px">รายการที่ ${n.idx} ${n.note}</span>`).join(',')}
+    </div>`;
+  }
+  // ── Footer (หน้าสุดท้ายเท่านั้น) ──
+  function renderFooter() {
+    // ── สร้าง signature box ตามบทบาท ──
+    const sigBoxes = [
+      {
+        role     : 'ผู้ขอ',
+        name     : po.createdBy || '',
+        sigUrl   : parseDriveUrl(po.createdBySignatureUrl || currentUser?.signatureUrl || ''),
+        showStamp: false,
+        issueDate: po.issueDate || ''
+      },
+      {
+        role     : 'ผู้อนุมัติ',
+        name     : po.approvedBy || '',
+        sigUrl   : parseDriveUrl(sigUrl || ''),
+        showStamp: false,
+        approvedDate: po.approvedAt || '' 
+      },
+      {
+        role     : 'ผู้มีอำนาจลงนาม',
+        name     : '',
+        sigUrl   : '',
+        showStamp: true
+      }
+    ];
+
+    const sigHtml = sigBoxes.map((box, i) => `
+      <div style="flex:1;text-align:center;padding:0 10px;
+                  ${i < 2 ? 'border-right:1px solid #eee' : ''}">
+        <div style="height:70px;overflow:hidden;display:flex;align-items:flex-end;
+                    justify-content:center;margin-bottom:4px">
+          ${box.showStamp
+            ? stampHtml
+            : box.sigUrl
+              ? `<img src="${box.sigUrl}"
+                      style="max-height:65px;max-width:130px;object-fit:contain;display:block"
+                      onerror="this.style.display='none'">`
+              : `<div style="height:65px"></div>`
+          }
+        </div>
+        <div style="border-top:1px solid #000;padding-top:5px;
+                    font-size:11px;font-weight:700;color:#1a3a5c">
+          ${box.role}
+        </div>
+        <div style="font-size:11px;color:#444;min-height:16px">
+          ${(box.name && !box.name.startsWith('http'))
+            ? `( ${box.name} )`
+            : '( ........................... )'}
+        </div>
+        <div style="font-size:11px;color:#aaa">
+          วันที่ ${box.issueDate ? formatDate(box.issueDate) : (box.approvedDate ? formatDate(box.approvedDate) : '......../......../........')}
+        </div>
+      </div>`
+    ).join('');
+
+    return `
+    <div style="display:flex;border-top:2px solid #1a3a5c">
+      <div style="flex:1;padding:10px 14px;border-right:1px solid #ccc;font-size:11px">
+        <div style="display:flex;align-items:center;gap:6px;
+                    padding-bottom:6px;border-bottom:1px solid #ddd;
+                    margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-weight:700;color:#1a3a5c">หมายเหตุ :</span>
+          ${po.plate
+            ? `<span style="background:#ffd600;color:#5a3e00;
+                            padding:1px 10px;font-weight:700">
+                ${po.plate}
+              </span>`
+            : ''}
+          ${po.refRepairNo
+            ? `<span style="background:#1a3a5c;color:#fff;padding:1px 10px">
+                Job: ${po.refRepairNo}
+              </span>`
+            : ''}
+        </div>
+        <div style="color:#444;line-height:1.9">
+          (1) โปรดระบุเลขที่ใบสั่งซื้อบนใบส่งของทุกฉบับ<br>
+          (2) การวางบิลและรับเช็คเป็นไปตามกำหนดเวลาที่บริษัทกำหนด<br>
+          (3) ในการวางบิลให้แนบสำเนาใบสั่งซื้อกำกับด้วย
+        </div>
+      </div>
+      <div style="width:220px;font-size:11px;flex-shrink:0">
+        <table style="width:100%;border-collapse:collapse">
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 12px;color:#555">มูลค่าสินค้าก่อนภาษี</td>
+            <td style="padding:5px 12px;text-align:right">${fmtNum(preVat)}</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 12px;color:#555">ส่วนลดสินค้า</td>
+            <td style="padding:5px 12px;text-align:right">0.00</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 12px;color:#555">เงินหลังหักส่วนลด</td>
+            <td style="padding:5px 12px;text-align:right">${fmtNum(preVat)}</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 12px;color:#555">ภาษีมูลค่าเพิ่ม (7%)</td>
+            <td style="padding:5px 12px;text-align:right">
+              ${vatType !== 'none' ? fmtNum(vat) : '0.00'}
+            </td>
+          </tr>
+          <tr style="background:#1a3a5c">
+            <td style="padding:7px 12px;color:#fff;font-weight:700">จำนวนเงินทั้งสิ้น</td>
+            <td style="padding:7px 12px;text-align:right;color:#fff;font-weight:700">
+              ${fmtNum(grand)}
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+    <div style="display:flex;padding:16px 14px 14px;border-top:1px solid #eee">
+      ${sigHtml}
+    </div>`;
+  }
+
+  // ── Render ทุกหน้า ──
+    const pages = chunks.map((chunk, pageIdx) => {
+    const isFirst    = pageIdx === 0;
+    const isLast     = pageIdx === totalPages - 1;
+    const startIdx   = pageIdx * ROWS_PER_PAGE;
+    const pageBreak  = !isLast ? 'page-break-after:always;' : '';
+
+    return `
+    <div style="background:#fff;max-width:780px;margin:0 auto;${pageBreak}">
+      ${renderHeader(pageIdx + 1)}
+      ${isFirst ? renderSupplier() : ''}
+      ${renderTableHeader()}
+        <tbody>${renderRows(chunk, startIdx, isLast)}</tbody>
+      </table>
+      ${isLast ? renderNotes(items) : ''}
+      ${isLast ? renderFooter() : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('printPreview').innerHTML =
+    `<div id="poPrintDoc" style="font-family:'Sarabun',sans-serif;font-size:12px;color:#000">${pages}</div>`;
+
+  new bootstrap.Modal(document.getElementById('printModal')).show();
+}
+
+function printPO() {
+  const el = document.getElementById('poPrintDoc');
+  if (!el) return;
+
+  // แสดง loading
+  Swal.fire({
+    title: 'กำลังเตรียมเอกสาร...',
+    html: '<div style="font-size:14px;color:#666">กรุณารอสักครู่</div>',
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  setTimeout(() => {
+    try {
+      const win = window.open('', '_blank');
+      if (!win) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'ไม่สามารถเปิดหน้าต่างได้',
+          text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ แล้วลองใหม่อีกครั้ง',
+          confirmButtonText: 'รับทราบ'
+        });
+        return;
+      }
+
+      win.document.write(`<!DOCTYPE html><html><head>
+          <title>ใบสั่งซื้ออะไหล่</title>
+          <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+          <style>
+            body{font-family:'Sarabun',sans-serif;margin:0;padding:16px}
+            @media print{
+              body{padding:0}
+              @page{size:A4;margin:12mm}
+            }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
+            }
+            /* บังคับสีตัวอักษรทุก element */
+            [style*="color:#555"],[style*="color: #555"]{ color:#555 !important }
+            [style*="color:#888"],[style*="color: #888"]{ color:#888 !important }
+            [style*="color:#aaa"],[style*="color: #aaa"]{ color:#aaa !important }
+            [style*="color:#fff"],[style*="color: #fff"]{ color:#fff !important }
+            [style*="color:#1a3a5c"]{ color:#1a3a5c !important }
+            [style*="color:#5a3e00"]{ color:#5a3e00 !important }
+            [style*="color:#c05050"]{ color:#c05050 !important }
+            [style*="color:#444"]{ color:#444 !important }
+            /* บังคับ background */
+            [style*="background:#1a3a5c"]{ background:#1a3a5c !important }
+            [style*="background:#ffd600"]{ background:#ffd600 !important }
+            [style*="background:#f0f4f8"]{ background:#f0f4f8 !important }
+            [style*="background:#f9fafb"]{ background:#f9fafb !important }
+          </style>
+        </head><body>
+        <div style="max-width:780px;margin:0 auto">${el.outerHTML}</div>
+        <script>window.onload=()=>window.print();<\/script>
+      </body></html>`);
+      win.document.close();
+
+      // ปิด loading หลังเปิดหน้าต่างสำเร็จ
+      Swal.fire({
+        icon: 'success',
+        title: 'เปิดเอกสารแล้ว',
+        text: 'หน้าต่างพิมพ์จะเปิดขึ้นอัตโนมัติ',
+        timer: 1800,
+        timerProgressBar: true,
+        showConfirmButton: false
+      });
+
+    } catch(e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'เกิดข้อผิดพลาด',
+        text: e.message,
+        confirmButtonText: 'ปิด'
+      });
+    }
+  }, 600); // หน่วงเล็กน้อยให้ loading แสดงก่อน
+}
+
+// ── STOCK ──
+function loadStock() {
+  google.script.run.withSuccessHandler(stock => {
+    allStock = stock || [];
+    updateStockStats(stock);
+    renderStockTable(stock);
+  }).getStock();
+  loadStockLog();
+}
+
+function updateStockStats(stock) {
+  const total = stock.length;
+  const inStock = stock.filter(s => parseFloat(s.qty) > parseFloat(s.minQty || 0)).length;
+  const low = stock.filter(s => parseFloat(s.qty) > 0 && parseFloat(s.qty) <= parseFloat(s.minQty || 0)).length;
+  const out = stock.filter(s => parseFloat(s.qty) <= 0).length;
+  document.getElementById('stockTotalItems').textContent = total;
+  document.getElementById('stockInStock').textContent = inStock;
+  document.getElementById('stockLow').textContent = low;
+  document.getElementById('stockOut').textContent = out;
+}
+
+function renderStockTable(stock) {
+  const tbody = document.getElementById('stockTableBody');
+  if (!stock.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="bi bi-boxes"></i>ยังไม่มีรายการอะไหล่</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = stock.map(s => {
+    const qty = parseFloat(s.qty) || 0;
+    const minQty = parseFloat(s.minQty) || 0;
+    let statusBadgeHtml, rowStyle = '';
+    if (qty <= 0) {
+      statusBadgeHtml = '<span class="badge-status" style="background:rgba(192,80,80,0.15);color:var(--claude-danger)"><i class="bi bi-x-circle"></i>หมดสต็อก</span>';
+      rowStyle = 'background:rgba(192,80,80,0.04)';
+    } else if (minQty > 0 && qty <= minQty) {
+      statusBadgeHtml = '<span class="badge-status status-waiting low-stock-badge"><i class="bi bi-exclamation-triangle"></i>ใกล้หมด</span>';
+      rowStyle = 'background:rgba(212,160,68,0.04)';
+    } else {
+      statusBadgeHtml = '<span class="badge-status status-done"><i class="bi bi-check-circle"></i>มีพอ</span>';
+    }
+    return `<tr style="${rowStyle}">
+      <td class="text-muted small">${s.partCode || '—'}</td>
+      <td class="fw-semibold">${s.partName}</td>
+      <td>${s.unit}</td>
+      <td class="text-end fw-bold ${qty <= 0 ? 'text-danger' : qty <= minQty ? 'text-warning' : ''}">${qty}</td>
+      <td class="text-end text-muted">${minQty}</td>
+      <td class="text-muted small">${s.location || '—'}</td>
+      <td>${statusBadgeHtml}</td>
+      <td class="text-center admin-only">
+        <div class="d-flex gap-1 justify-content-center">
+          <button class="btn btn-sm btn-outline-primary" onclick="showStockModal('${s.id}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-danger" onclick="deleteStockItem('${s.id}')"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterStock() {
+  const q = document.getElementById('stockSearch').value.toLowerCase();
+  const f = document.getElementById('stockStatusFilter').value;
+  renderStockTable(allStock.filter(s => {
+    const qOk = !q || s.partName.toLowerCase().includes(q) || (s.partCode || '').toLowerCase().includes(q);
+    const qty = parseFloat(s.qty) || 0, minQty = parseFloat(s.minQty) || 0;
+    const sOk = !f ||
+      (f === 'out' && qty <= 0) ||
+      (f === 'low' && qty > 0 && qty <= minQty && minQty > 0) ||
+      (f === 'ok' && qty > minQty);
+    return qOk && sOk;
+  }));
+}
+
+function loadStockLog() {
+  // Minimal log from stock movement - show from StockLog sheet
+  document.getElementById('stockLogBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2 small">กำลังโหลด...</td></tr>';
+  // Use a basic approach since we don't have a direct getStockLog function
+  // You can extend this as needed
+  document.getElementById('stockLogBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2 small">ดูข้อมูลใน Google Sheet ชีท StockLog</td></tr>';
+}
+
+function showStockModal(id = null) {
+  document.getElementById('stockItemId').value = '';
+  document.getElementById('stockPartCode').value = '';
+  document.getElementById('stockPartCode').placeholder = 'กำลังโหลดรหัส...';
+  document.getElementById('stockPartName').value = '';
+  document.getElementById('stockUnit').value = 'ชิ้น';
+  document.getElementById('stockQty').value = 0;
+  document.getElementById('stockMinQty').value = 0;
+  document.getElementById('stockLocation').value = '';
+  document.getElementById('stockNote').value = '';
+  document.getElementById('stockModalTitle').textContent = id ? 'แก้ไขอะไหล่' : 'เพิ่มอะไหล่';
+
+  if (id) {
+    const s = allStock.find(x => x.id === id);
+    if (s) {
+      document.getElementById('stockItemId').value = s.id;
+      document.getElementById('stockPartCode').value = s.partCode || '';
+      document.getElementById('stockPartCode').placeholder = 'รหัสอะไหล่';
+      document.getElementById('stockPartName').value = s.partName;
+      document.getElementById('stockUnit').value = s.unit || '';
+      document.getElementById('stockQty').value = s.qty || 0;
+      document.getElementById('stockMinQty').value = s.minQty || 0;
+      document.getElementById('stockLocation').value = s.location || '';
+      document.getElementById('stockNote').value = s.note || '';
+    }
+  } else {
+    // เพิ่มใหม่ — ดึงรหัสล่วงหน้า
+    google.script.run
+      .withSuccessHandler(code => {
+        document.getElementById('stockPartCode').placeholder = code + ' (อัตโนมัติ)';
+      })
+      .withFailureHandler(() => {
+        document.getElementById('stockPartCode').placeholder = 'กรอกรหัส หรือปล่อยว่างให้ระบบสร้าง';
+      })
+      .generatePartCode();
+  }
+
+  new bootstrap.Modal(document.getElementById('stockModal')).show();
+}
+
+function saveStockItem() {
+  const item = {
+    id: document.getElementById('stockItemId').value,
+    partCode: document.getElementById('stockPartCode').value,
+    partName: document.getElementById('stockPartName').value,
+    unit: document.getElementById('stockUnit').value,
+    qty: parseFloat(document.getElementById('stockQty').value) || 0,
+    minQty: parseFloat(document.getElementById('stockMinQty').value) || 0,
+    location: document.getElementById('stockLocation').value,
+    note: document.getElementById('stockNote').value
+  };
+  if (!item.partName) { showToast('warning', 'กรุณากรอกชื่ออะไหล่'); return; }
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success', `บันทึกเรียบร้อย${res.partCode ? ' | รหัส: ' + res.partCode : ''}`);
+        bootstrap.Modal.getInstance(document.getElementById('stockModal')).hide();
+        loadStock();
+      } else { showToast('error', res.message); }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .saveStockItem(item);
+}
+
+function deleteStockItem(id) {
+  confirmAction('ลบรายการอะไหล่นี้?', () => {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadStock(); }
+        else { showToast('error', res.message); }
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .deleteStockItem(id);
+  });
+}
+// ── MANUAL DEDUCT STOCK ──
+
+function showDeductModal() {
+  deductRows = [];
+  document.getElementById('deductDate').value  = todayISO();
+  document.getElementById('deductPlate').value = '';
+  document.getElementById('deductNote').value  = '';
+  document.getElementById('deductSummary').classList.add('d-none');
+  renderDeductItems();
+  new bootstrap.Modal(document.getElementById('deductStockModal')).show();
+}
+
+function openDeductPicker() {
+  // ย้าย modal ออกมาที่ body ก่อนเสมอ
+  const modal = document.getElementById('poPartPickerModal');
+  if (modal && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+
+  selectedPOPartIds.clear();
+  document.getElementById('poPartPickerSearch').value = '';
+  document.getElementById('poPartPickerCustom').value = '';
+  document.getElementById('poPartPickerSelectAll').checked = false;
+  updatePOPartPickerCount();
+
+  // โหลด stock ถ้ายังไม่มี
+  if (!allStock.length) {
+    showLoading('กำลังโหลดรายการอะไหล่...');
+    google.script.run
+      .withSuccessHandler(stock => {
+        Swal.close();
+        allStock = stock || [];
+        renderPOPartPickerTable(allStock);
+      })
+      .withFailureHandler(err => {
+        Swal.close();
+        showToast('error', 'โหลด Stock ไม่สำเร็จ');
+      })
+      .getStock();
+  } else {
+    renderPOPartPickerTable(allStock);
+  }
+
+  // override confirm button ให้ชี้ไป confirmDeductPicker
+  document.getElementById('confirmPOPartPickBtn').onclick = confirmDeductPicker;
+  new bootstrap.Modal(modal).show();
+}
+
+function confirmDeductPicker() {
+  const picked = allStock.filter(s => selectedPOPartIds.has(s.id));
+  picked.forEach(s => {
+    if (!deductRows.find(r => r.stockId === s.id)) {
+      deductRows.push({
+        stockId : s.id,
+        partName: s.partName,
+        currentQty: parseFloat(s.qty) || 0,
+        unit    : s.unit || 'ชิ้น',
+        qty     : 1
+      });
+    }
+  });
+  renderDeductItems();
+  selectedPOPartIds.clear();
+  // reset confirm button กลับ
+  document.getElementById('confirmPOPartPickBtn').onclick = confirmPOMultiPick;
+  bootstrap.Modal.getInstance(document.getElementById('poPartPickerModal')).hide();
+}
+
+function renderDeductItems() {
+  const tbody = document.getElementById('deductItemsBody');
+  if (!deductRows.length) {
+    tbody.innerHTML = `<tr id="deductEmptyRow">
+      <td colspan="6" class="text-center text-muted py-3">กดเลือกจาก Stock ด้านบน</td>
+    </tr>`;
+    return;
+  }
+  tbody.innerHTML = deductRows.map((r, i) => {
+    const overQty = r.qty > r.currentQty;
+    return `<tr>
+      <td class="text-muted">${i + 1}</td>
+      <td class="fw-semibold">${r.partName}</td>
+      <td class="text-end ${r.currentQty <= 0 ? 'text-danger' : 'text-muted'}">
+        ${r.currentQty}
+      </td>
+      <td>
+        <input type="number" class="form-control form-control-sm text-center
+          ${overQty ? 'border-danger' : ''}"
+          value="${r.qty}" min="0.01" step="0.01"
+          style="width:75px"
+          onchange="deductRows[${i}].qty=parseFloat(this.value)||0;renderDeductItems()">
+        ${overQty
+          ? `<div class="text-danger" style="font-size:10px">เกินคงเหลือ</div>`
+          : ''}
+      </td>
+      <td class="text-muted">${r.unit}</td>
+      <td>
+        <button class="btn btn-sm btn-outline-danger"
+          onclick="deductRows.splice(${i},1);renderDeductItems()">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function confirmDeductStock() {
+  const date  = document.getElementById('deductDate').value;
+  const plate = document.getElementById('deductPlate').value.trim();
+  const note  = document.getElementById('deductNote').value.trim();
+
+  if (!date)           { showToast('warning', 'กรุณาเลือกวันที่');      return; }
+  if (!plate)          { showToast('warning', 'กรุณาระบุทะเบียนรถ');   return; }
+  if (!deductRows.length) { showToast('warning', 'กรุณาเลือกอะไหล่');  return; }
+
+  const overLimit = deductRows.find(r => r.qty > r.currentQty);
+  const confirmText = overLimit
+    ? `<div class="text-danger small mb-2">
+         <i class="bi bi-exclamation-triangle me-1"></i>
+         มีรายการที่ตัดเกินจำนวนคงเหลือ ระบบจะตัดจนเหลือ 0
+       </div>`
+    : '';
+
+  Swal.fire({
+    title: 'ยืนยันตัดอะไหล่?',
+    html: `${confirmText}
+      <div style="font-size:13px;text-align:left">
+        <div><b>วันที่:</b> ${formatDate(date)}</div>
+        <div><b>ทะเบียน:</b> ${plate}</div>
+        <div><b>จำนวน:</b> ${deductRows.length} รายการ</div>
+        ${note ? `<div><b>หมายเหตุ:</b> ${note}</div>` : ''}
+      </div>`,
+    icon: overLimit ? 'warning' : 'question',
+    showCancelButton: true,
+    confirmButtonText: 'ยืนยัน',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: 'var(--claude-danger)'
+  }).then(r => {
+    if (!r.isConfirmed) return;
+    showLoading('กำลังตัดอะไหล่...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (!res.success) { showToast('error', res.message); return; }
+
+        // แสดงสรุป
+        const summaryEl = document.getElementById('deductSummary');
+        document.getElementById('deductSummaryList').innerHTML =
+          res.results.map(r => r.error
+            ? `<div class="text-danger">❌ ${r.partName}: ${r.error}</div>`
+            : `<div>✅ ${r.partName}: ${r.before} → <b>${r.after}</b></div>`
+          ).join('');
+        summaryEl.classList.remove('d-none');
+
+        showToast('success', `ตัดอะไหล่ ${deductRows.length} รายการเรียบร้อย`);
+        deductRows = [];
+        renderDeductItems();
+        loadStock(); // refresh ตาราง
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .manualDeductStock(
+        deductRows.map(r => ({ stockId: r.stockId, partName: r.partName, qty: r.qty })),
+        date, plate, note
+      );
+  });
+}
+
+function loadStockLog() {
+  document.getElementById('stockLogBody').innerHTML =
+    '<tr><td colspan="5" class="text-center text-muted py-2 small">กำลังโหลด...</td></tr>';
+
+  google.script.run
+    .withSuccessHandler(logs => {
+      const tbody = document.getElementById('stockLogBody');
+      tbody.closest('table').classList.add('table-card-mobile');
+
+      if (!logs.length) {
+        tbody.innerHTML = '<tr><td colspan="5" data-label="" class="text-center text-muted py-3">ยังไม่มีประวัติ</td></tr>';
+        return;
+      }
+
+      const typeLabel = {
+        'IN'         : { label: 'รับเข้า',      cls: 'status-done',          icon: 'box-arrow-in-down' },
+        'OUT'        : { label: 'ตัดออก(ซ่อม)', cls: 'status-inprogress',    icon: 'box-arrow-up' },
+        'OUT-MANUAL' : { label: 'ตัดออก(manual)', cls: 'status-waiting',     icon: 'scissors' },
+        'LINE_REG'   : { label: 'ลงทะเบียน Line', cls: 'status-approved',   icon: 'line' }
+      };
+
+      tbody.innerHTML = logs.map(l => {
+        const t = typeLabel[l.type] || { label: l.type, cls: 'status-waiting-parts', icon: 'question' };
+        return `<tr>
+          <td data-label="วันที่/เวลา" class="text-muted small">
+            ${formatDate(l.timestamp)}
+          </td>
+          <td data-label="ประเภท">
+            <span class="badge-status ${t.cls}">
+              <i class="bi bi-${t.icon}"></i>${t.label}
+            </span>
+          </td>
+          <td data-label="อะไหล่" class="fw-semibold">${l.partName}</td>
+          <td data-label="จำนวน" class="fw-bold">${l.qty}</td>
+          <td data-label="อ้างอิง" class="text-muted small">${l.ref}</td>
+        </tr>`;
+      }).join('');
+    })
+    .withFailureHandler(e => {
+      document.getElementById('stockLogBody').innerHTML =
+        `<tr><td colspan="5" class="text-center text-danger py-2 small">${e.message}</td></tr>`;
+    })
+    .getStockLog(50);  // โหลด 50 รายการล่าสุด
+}
+
+// ── USERS ──
+function loadUsers() {
+  google.script.run.withSuccessHandler(users => {
+    const tbody = document.getElementById('usersTableBody');
+    tbody.closest('table').classList.add('table-card-mobile');
+    if (!users.length) {
+      tbody.innerHTML = `<tr><td colspan="6" data-label=""><div class="empty-state"><i class="bi bi-people"></i>ยังไม่มีผู้ใช้</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td data-label="ID" class="text-muted small">${u.id}</td>
+        <td data-label="ชื่อผู้ใช้" class="fw-semibold">${u.username}</td>
+        <td data-label="ชื่อ-สกุล">${u.name}</td>
+        <td data-label="บทบาท"><span class="badge-status ${u.role === 'admin' ? 'status-approved' : 'status-waiting-parts'}">${u.role === 'admin' ? 'Admin' : 'User'}</span></td>
+        <td data-label="สถานะ"><span class="badge-status ${u.status === 'active' ? 'status-done' : 'status-waiting-parts'}">${u.status === 'active' ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span></td>
+        <td data-label="">
+          <div class="d-flex gap-1 justify-content-end">
+            <button class="btn btn-sm btn-outline-primary" onclick="showUserModal('${u.id}')"><i class="bi bi-pencil"></i></button>
+            ${u.id !== currentUser?.id ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')"><i class="bi bi-trash"></i></button>` : ''}
+          </div>
+        </td>
+      </tr>`).join('');
+  }).getUsers();
+}
+
+function showUserModal(id = null) {
+  document.getElementById('editUserId').value = '';
+  document.getElementById('userUsername').value = '';
+  document.getElementById('userPassword').value = '';
+  document.getElementById('userName').value = '';
+  document.getElementById('userRole').value = 'user';
+  document.getElementById('userStatus').value = 'active';
+  document.getElementById('userLineUserId').value = '';
+  document.getElementById('userSignatureUrl').value = '';
+  document.getElementById('userModalTitle').textContent = id ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้';
+  document.getElementById('pwRequired').style.display = id ? 'none' : '';
+
+  if (id) {
+    google.script.run.withSuccessHandler(users => {
+      const u = users.find(x => x.id === id);
+      if (u) {
+        document.getElementById('editUserId').value = u.id;
+        document.getElementById('userUsername').value = u.username;
+        document.getElementById('userName').value = u.name;
+        document.getElementById('userRole').value = u.role;
+        document.getElementById('userStatus').value = u.status;
+        document.getElementById('userLineUserId').value = u.lineUserId || '';
+        document.getElementById('userSignatureUrl').value = u.signatureUrl || '';
+      }
+    }).getUsers();
+  }
+  new bootstrap.Modal(document.getElementById('userModal')).show();
+}
+
+function saveUser() {
+  const user = {
+    id           : document.getElementById('editUserId').value,
+    username     : document.getElementById('userUsername').value,
+    password     : document.getElementById('userPassword').value,
+    name         : document.getElementById('userName').value,
+    role         : document.getElementById('userRole').value,
+    status       : document.getElementById('userStatus').value,
+    lineUserId   : document.getElementById('userLineUserId').value.trim(),
+    signatureUrl : document.getElementById('userSignatureUrl').value.trim()
+  };
+  if (!user.username || !user.name || (!user.id && !user.password)) {
+    showToast('warning', 'กรุณากรอกข้อมูลให้ครบ'); return;
+  }
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success', 'บันทึกเรียบร้อย');
+        bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+        loadUsers();
+      } else { showToast('error', res.message); }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .saveUser(user);
+}
+
+function deleteUser(id) {
+  confirmAction('ลบผู้ใช้รายนี้?', () => {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadUsers(); }
+        else { showToast('error', res.message); }
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .deleteUser(id);
+  });
+}
+
+function previewSignature() {
+  const url = document.getElementById('userSignatureUrl').value.trim();
+  const box = document.getElementById('sigPreviewBox');
+  const img = document.getElementById('sigPreview');
+  if (url) {
+    img.src = parseDriveUrl(url);
+    box.style.display = '';
+  } else {
+    box.style.display = 'none';
+  }
+}
+
+function copyLineId() {
+  const val = document.getElementById('userLineUserId').value;
+  if (val) {
+    navigator.clipboard.writeText(val)
+      .then(() => showToast('success', 'คัดลอก Line User ID แล้ว'));
+  } else {
+    showToast('warning', 'ไม่มี Line User ID ให้คัดลอก');
+  }
+}
+
+// ── SETTINGS ──
+// Keys ที่เป็นข้อมูลบริษัท — ไม่แสดงในตาราง Other Settings
+const COMPANY_KEYS = [
+  'COMPANY_NAME_EN','COMPANY_NAME_TH',
+  'COMPANY_ADDRESS_EN','COMPANY_ADDRESS_TH',
+  'COMPANY_TEL','COMPANY_FAX','COMPANY_TAX_ID',
+  'COMPANY_LOGO',
+  'COMPANY_STAMP'   // ✅ ตราประทับ
+];
+
+function loadSettings() {
+  google.script.run.withSuccessHandler(settings => {
+    const obj = {};
+    (settings || []).forEach(s => obj[s.key] = s.value);
+    renderCompanySettings(obj);
+    renderOtherSettings(settings || []);
+  }).getAllSettings();
+}
+
+// แสดงข้อมูลบริษัทในฟอร์ม
+function renderCompanySettings(s) {
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  setVal('settingCompanyNameEN',    s.COMPANY_NAME_EN);
+  setVal('settingCompanyNameTH',    s.COMPANY_NAME_TH);
+  setVal('settingCompanyAddressEN', s.COMPANY_ADDRESS_EN);
+  setVal('settingCompanyAddressTH', s.COMPANY_ADDRESS_TH);
+  setVal('settingCompanyTel',       s.COMPANY_TEL);
+  setVal('settingCompanyFax',       s.COMPANY_FAX);
+  setVal('settingCompanyTaxId',     s.COMPANY_TAX_ID);
+  setVal('settingLogoUrl',          s.COMPANY_LOGO);
+  setVal('settingStampUrl',         s.COMPANY_STAMP);   // ✅
+
+  // Logo preview
+  _applyImagePreview('settingLogoUrl',  'settingLogoPreview',  'settingLogoEmpty',  s.COMPANY_LOGO);
+  // Stamp preview ✅
+  _applyImagePreview('settingStampUrl', 'settingStampPreview', 'settingStampEmpty', s.COMPANY_STAMP);
+}
+
+function _applyImagePreview(inputId, imgId, emptyId, url) {
+  const img   = document.getElementById(imgId);
+  const empty = document.getElementById(emptyId);
+  if (!img) return;
+  if (url) {
+    img.src = url;
+    img.style.display = '';
+    if (empty) empty.style.display = 'none';
+  } else {
+    img.style.display = 'none';
+    if (empty) empty.style.display = '';
+  }
+}
+
+// ── parseDriveUrl: แปลง Google Drive share URL → thumbnail URL ──
+function parseDriveUrl(url) {
+  if (!url) return url;
+  const match = url.match(/[-\w]{25,}/);
+  if (match) return 'https://drive.google.com/thumbnail?id=' + match[0] + '&sz=w400';
+  return url;
+}
+
+// ── Preview โลโก้ ──
+function previewLogo() {
+  _previewImage('settingLogoUrl', 'settingLogoPreview', 'settingLogoEmpty');
+}
+
+// ✅ Preview ตราประทับ
+function previewStamp() {
+  _previewImage('settingStampUrl', 'settingStampPreview', 'settingStampEmpty');
+}
+
+function _previewImage(inputId, imgId, emptyId) {
+  const input = document.getElementById(inputId);
+  const img   = document.getElementById(imgId);
+  const empty = document.getElementById(emptyId);
+  if (!input || !img) return;
+  const rawUrl = input.value.trim();
+  if (!rawUrl) {
+    img.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  const formatted = parseDriveUrl(rawUrl);
+  input.value = formatted;
+  img.onload  = function() { this.style.display = ''; if (empty) empty.style.display = 'none'; };
+  img.onerror = function() {
+    // fallback
+    if (formatted.indexOf('thumbnail') !== -1) {
+      const m = formatted.match(/id=([-\w]+)/);
+      if (m) { this.src = 'https://drive.google.com/uc?export=view&id=' + m[1]; return; }
+    }
+    this.style.display = 'none';
+    if (empty) empty.style.display = '';
+  };
+  img.src = formatted;
+}
+
+// บันทึกข้อมูลบริษัท
+function saveCompanySettings() {
+  const map = {
+    COMPANY_NAME_EN:    'settingCompanyNameEN',
+    COMPANY_NAME_TH:    'settingCompanyNameTH',
+    COMPANY_ADDRESS_EN: 'settingCompanyAddressEN',
+    COMPANY_ADDRESS_TH: 'settingCompanyAddressTH',
+    COMPANY_TEL:        'settingCompanyTel',
+    COMPANY_FAX:        'settingCompanyFax',
+    COMPANY_TAX_ID:     'settingCompanyTaxId',
+    COMPANY_LOGO:       'settingLogoUrl',
+    COMPANY_STAMP:      'settingStampUrl'   // ✅
+  };
+  google.script.run.withSuccessHandler(allSettings => {
+    const existing = {};
+    (allSettings || []).forEach(s => existing[s.key] = s.value);
+    Object.entries(map).forEach(([k, id]) => {
+      const el = document.getElementById(id);
+      if (el) existing[k] = el.value.trim();
+    });
+    const merged = Object.entries(existing).map(([key, value]) => ({ key, value }));
+    showLoading('กำลังบันทึก...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) showToast('success', 'บันทึกข้อมูลบริษัทเรียบร้อย');
+        else showToast('error', res.message);
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .saveSettings(merged);
+  }).getAllSettings();
+}
+
+// Other Settings (ไม่รวม company keys)
+function renderOtherSettings(settings) {
+  const others = settings.filter(s => !COMPANY_KEYS.includes(s.key));
+  renderSettingsTable(others);
+}
+
+function renderSettingsTable(settings) {
+  const tbody = document.getElementById('settingsBody');
+  if (!tbody) return;
+  tbody.innerHTML = settings.map((s, i) => `
+    <tr>
+      <td><input type="text" class="form-control form-control-sm" value="${s.key}" id="settingKey_${i}"></td>
+      <td><input type="text" class="form-control form-control-sm" value="${s.value}" id="settingVal_${i}"></td>
+      <td><button class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+    </tr>`).join('') || '<tr><td colspan="3" class="text-center text-muted py-3 small">ไม่มีการตั้งค่าพิเศษ</td></tr>';
+}
+
+function addSettingRow() {
+  const tbody = document.getElementById('settingsBody');
+  if (!tbody) return;
+  const i = Date.now();
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" id="settingKey_${i}" placeholder="Key"></td>
+    <td><input type="text" class="form-control form-control-sm" id="settingVal_${i}" placeholder="Value"></td>
+    <td><button class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>`;
+  tbody.appendChild(tr);
+}
+
+function saveSettings() {
+  const rows = document.querySelectorAll('#settingsBody tr');
+  const extra = [];
+  rows.forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    if (inputs[0]?.value) extra.push({ key: inputs[0].value, value: inputs[1]?.value || '' });
+  });
+  google.script.run.withSuccessHandler(allSettings => {
+    // รักษา company keys ที่มีอยู่ + เพิ่ม extra
+    const existing = {};
+    (allSettings || []).forEach(s => { if (COMPANY_KEYS.includes(s.key)) existing[s.key] = s.value; });
+    const merged = [...Object.entries(existing).map(([key,value])=>({key,value})), ...extra];
+    showLoading('กำลังบันทึก...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) showToast('success', 'บันทึกการตั้งค่าเรียบร้อย');
+        else showToast('error', res.message);
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .saveSettings(merged);
+  }).getAllSettings();
+}
+
+// ── BUSES PAGE ──
+let allBusesData = [];
+
+function loadBuses() {
+  google.script.run.withSuccessHandler(buses => {
+    allBusesData = buses || [];
+    allBuses = buses.map(b => ({ plate: b.plate, chassis: b.chassis }));
+    // Load repairs first for status, then render
+    if (allRepairs.length) {
+      updateBusStats(buses);
+      renderBuses(buses);
+    } else {
+      google.script.run.withSuccessHandler(repairs => {
+        allRepairs = repairs || [];
+        updateBusStats(buses);
+        renderBuses(buses);
+      }).getRepairs();
+    }
+  }).getFullBuses();
+}
+
+function updateBusStats(buses) {
+  const total = buses.length;
+  const inRepair   = buses.filter(b => allRepairs.find(x => x.plate === b.plate && ['กำลังดำเนินการ','อนุมัติซ่อม','รอซ่อม'].includes(x.status))).length;
+  const waitParts  = buses.filter(b => allRepairs.find(x => x.plate === b.plate && x.status === 'รออะไหล่')).length;
+  document.getElementById('busTotalCount').textContent   = total;
+  document.getElementById('busInRepair').textContent     = inRepair;
+  document.getElementById('busWaitingParts').textContent = waitParts;
+  document.getElementById('busReady').textContent        = Math.max(0, total - inRepair - waitParts);
+}
+
+function filterBuses() {
+  const q = document.getElementById('busSearch').value.toLowerCase();
+  renderBuses(allBusesData.filter(b =>
+    !q || b.plate.toLowerCase().includes(q) ||
+    (b.chassis||'').toLowerCase().includes(q) ||
+    (b.model||'').toLowerCase().includes(q)
+  ));
+}
+
+function setBusView(mode) {
+  document.getElementById('busTableView').classList.toggle('d-none', mode !== 'table');
+  document.getElementById('busCardView').classList.toggle('d-none',  mode !== 'card');
+  document.getElementById('viewTableBtn').classList.toggle('active', mode === 'table');
+  document.getElementById('viewCardBtn').classList.toggle('active',  mode === 'card');
+}
+
+function renderBuses(buses) { renderBusTable(buses); renderBusCards(buses); }
+
+function getBusStatusForPlate(plate) {
+  const active = allRepairs.filter(r => r.plate === plate && r.status !== 'เสร็จแล้ว');
+  if (active.find(r => r.status === 'รออะไหล่'))       return { label: 'รออะไหล่',        cls: 'status-waiting-parts' };
+  if (active.find(r => r.status === 'กำลังดำเนินการ')) return { label: 'กำลังซ่อม',        cls: 'status-inprogress'   };
+  if (active.find(r => r.status === 'อนุมัติซ่อม'))    return { label: 'อนุมัติซ่อมแล้ว', cls: 'status-approved'     };
+  if (active.find(r => r.status === 'รอซ่อม'))          return { label: 'รอซ่อม',           cls: 'status-waiting'      };
+  return { label: 'พร้อมใช้งาน', cls: 'status-done' };
+}
+
+function busExpiryTag(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    const diffDays = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+    if (diffDays < 0)   return '<span class="badge-status" style="background:rgba(192,80,80,.15);color:var(--claude-danger);font-size:11px"><i class="bi bi-exclamation-circle me-1"></i>หมดอายุแล้ว</span>';
+    if (diffDays <= 30) return '<span class="badge-status status-waiting" style="font-size:11px"><i class="bi bi-exclamation-triangle me-1"></i>อีก ' + diffDays + ' วัน</span>';
+    return '<span class="text-muted small">' + formatDate(dateStr) + '</span>';
+  } catch(e) { return dateStr; }
+}
+
+function renderBusTable(buses) {
+  const tbody = document.getElementById('busTableBody');
+  tbody.closest('table').classList.add('table-card-mobile');
+  if (!buses.length) {
+    tbody.innerHTML = '<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-bus-front"></i>ยังไม่มีข้อมูลรถบัส</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = buses.map(b => {
+    const st  = getBusStatusForPlate(b.plate);
+    const cnt = allRepairs.filter(r => r.plate === b.plate).length;
+    return '<tr>' +
+      '<td data-label="ทะเบียน"><div class="fw-bold" style="color:var(--claude-secondary)">' + b.plate + '</div>' +
+        '<div class="text-muted small">' + (b.model||'') + (b.year ? ' | ปี '+b.year : '') + '</div></td>' +
+      '<td data-label="เลขคัสซี" class="text-muted small">' + (b.chassis||'—') + '</td>' +
+      '<td data-label="รุ่น">' + (b.model||'—') + '</td>' +
+      '<td data-label="ปีที่ผลิต" class="text-muted">' + (b.year||'—') + '</td>' +
+      '<td data-label="สถานะ"><span class="badge-status ' + st.cls + '">' + st.label + '</span></td>' +
+      '<td data-label="ประวัติซ่อม"><button class="btn btn-sm btn-outline-secondary" onclick="showBusHistory(\'' + b.plate + '\')"><i class="bi bi-clock-history me-1"></i>' + cnt + ' ครั้ง</button></td>' +
+      '<td data-label="" class="admin-only">' +
+        '<div class="d-flex gap-1 justify-content-end">' +
+          '<button class="btn btn-sm btn-outline-primary" onclick="showBusModal(\'' + b.plate + '\')"><i class="bi bi-pencil"></i></button>' +
+          '<button class="btn btn-sm btn-danger" onclick="deleteBus(\'' + b.plate + '\')"><i class="bi bi-trash"></i></button>' +
+        '</div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+function renderBusCards(buses) {
+  const c = document.getElementById('busCardBody');
+  if (!buses.length) {
+    c.innerHTML = '<div class="col-12"><div class="empty-state"><i class="bi bi-bus-front"></i>ยังไม่มีข้อมูลรถบัส</div></div>';
+    return;
+  }
+  c.innerHTML = buses.map(b => {
+    const st  = getBusStatusForPlate(b.plate);
+    const cnt = allRepairs.filter(r => r.plate === b.plate).length;
+    return '<div class="col-sm-6 col-xl-4">' +
+      '<div class="card h-100" style="border-left:4px solid var(--claude-primary)">' +
+      '<div class="card-body">' +
+        '<div class="d-flex justify-content-between align-items-start mb-3">' +
+          '<div><div class="fw-bold fs-5" style="color:var(--claude-secondary)">' + b.plate + '</div>' +
+          '<div class="text-muted small">' + (b.model||'ไม่ระบุรุ่น') + (b.year?' | ปี '+b.year:'') + '</div></div>' +
+          '<span class="badge-status ' + st.cls + '">' + st.label + '</span>' +
+        '</div>' +
+        '<div class="row g-2 mb-3" style="font-size:13px">' +
+          '<div class="col-6"><div class="text-muted" style="font-size:11px">เลขคัสซี</div><div class="fw-semibold">' + (b.chassis||'—') + '</div></div>' +
+          '<div class="col-6"><div class="text-muted" style="font-size:11px">สี</div><div class="fw-semibold">' + (b.color||'—') + '</div></div>' +
+          '<div class="col-6"><div class="text-muted" style="font-size:11px">ต่อทะเบียนถึง</div><div>' + busExpiryTag(b.regExpiry) + '</div></div>' +
+          '<div class="col-6"><div class="text-muted" style="font-size:11px">ประกันถึง</div><div>' + busExpiryTag(b.insuranceExpiry) + '</div></div>' +
+        '</div>' +
+        '<div class="d-flex gap-2 justify-content-between align-items-center">' +
+          '<button class="btn btn-sm btn-outline-secondary" onclick="showBusHistory(\'' + b.plate + '\')"><i class="bi bi-clock-history me-1"></i>ซ่อม ' + cnt + ' ครั้ง</button>' +
+          '<div class="d-flex gap-1 admin-only">' +
+            '<button class="btn btn-sm btn-outline-primary" onclick="showBusModal(\'' + b.plate + '\')"><i class="bi bi-pencil"></i></button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteBus(\'' + b.plate + '\')"><i class="bi bi-trash"></i></button>' +
+          '</div>' +
+        '</div>' +
+      '</div></div></div>';
+  }).join('');
+}
+
+function showBusModal(plate) {
+  var fields = ['editBusOldPlate','busPlate','busChassis','busModel','busYear','busColor','busEngineNo','busLastInspect','busRegExpiry','busInsuranceExpiry','busNote'];
+  fields.forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('busModalTitle').innerHTML = plate
+    ? '<i class="bi bi-pencil me-2"></i>แก้ไขรถบัส'
+    : '<i class="bi bi-bus-front me-2"></i>เพิ่มรถบัสใหม่';
+  if (plate) {
+    var b = allBusesData.find(function(x) { return x.plate === plate; });
+    if (b) {
+      document.getElementById('editBusOldPlate').value    = b.plate;
+      document.getElementById('busPlate').value           = b.plate;
+      document.getElementById('busChassis').value         = b.chassis||'';
+      document.getElementById('busModel').value           = b.model||'';
+      document.getElementById('busYear').value            = b.year||'';
+      document.getElementById('busColor').value           = b.color||'';
+      document.getElementById('busEngineNo').value        = b.engineNo||'';
+      document.getElementById('busLastInspect').value     = b.lastInspect||'';
+      document.getElementById('busRegExpiry').value       = b.regExpiry||'';
+      document.getElementById('busInsuranceExpiry').value = b.insuranceExpiry||'';
+      document.getElementById('busNote').value            = b.note||'';
+    }
+  }
+  new bootstrap.Modal(document.getElementById('busModal')).show();
+}
+
+function saveBusFromPage() {
+  var plate = document.getElementById('busPlate').value.trim();
+  if (!plate) { showToast('warning', 'กรุณากรอกป้ายทะเบียน'); return; }
+  var bus = {
+    oldPlate:         document.getElementById('editBusOldPlate').value,
+    plate:            plate,
+    chassis:          document.getElementById('busChassis').value,
+    model:            document.getElementById('busModel').value,
+    year:             document.getElementById('busYear').value,
+    color:            document.getElementById('busColor').value,
+    engineNo:         document.getElementById('busEngineNo').value,
+    lastInspect:      document.getElementById('busLastInspect').value,
+    regExpiry:        document.getElementById('busRegExpiry').value,
+    insuranceExpiry:  document.getElementById('busInsuranceExpiry').value,
+    note:             document.getElementById('busNote').value
+  };
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(function(res) {
+      Swal.close();
+      if (res.success) {
+        showToast('success', 'บันทึกข้อมูลรถบัสเรียบร้อย');
+        bootstrap.Modal.getInstance(document.getElementById('busModal')).hide();
+        loadBuses();
+        loadBusPlates();
+      } else { showToast('error', res.message); }
+    })
+    .withFailureHandler(function(e) { Swal.close(); showToast('error', e.message); })
+    .saveBus(bus);
+}
+
+function deleteBus(plate) {
+  confirmAction('ลบทะเบียนรถ "' + plate + '" ออกจากระบบ?', function() {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(function(res) {
+        Swal.close();
+        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadBuses(); loadBusPlates(); }
+        else showToast('error', res.message);
+      })
+      .withFailureHandler(function(e) { Swal.close(); showToast('error', e.message); })
+      .deleteBus(plate);
+  });
+}
+
+function showBusHistory(plate) {
+  document.getElementById('busHistoryPlate').textContent = plate;
+  var history = allRepairs.filter(function(r) { return r.plate === plate; })
+    .sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
+  document.getElementById('busHistoryBody').innerHTML = history.length
+    ? history.map(function(r) {
+        return '<tr>' +
+          '<td><span class="fw-semibold" style="color:var(--claude-primary)">' + r.repairNo + '</span></td>' +
+          '<td>' + formatDate(r.date) + '</td>' +
+          '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + r.repairList + '</td>' +
+          '<td class="text-end">' + (r.mileage ? Number(r.mileage).toLocaleString() : '—') + '</td>' +
+          '<td>' + statusBadge(r.status) + '</td>' +
+        '</tr>';
+      }).join('')
+    : '<tr><td colspan="5"><div class="empty-state" style="padding:24px"><i class="bi bi-tools"></i>ยังไม่มีประวัติการซ่อม</div></td></tr>';
+  new bootstrap.Modal(document.getElementById('busHistoryModal')).show();
+}
+
+
+// ── OIL PROGRAM ──
+function toggleOilProgram(prog) {
+  const cur = document.getElementById('repairOilProgram').value;
+  const next = cur === prog ? '' : prog;
+  setOilProgramUI(next);
+}
+function setOilProgramUI(prog) {
+  document.getElementById('repairOilProgram').value = prog;
+  ['S','M','S2','L'].forEach(p => {
+    const el = document.getElementById('oilCard_'+p);
+    if(el) el.classList.toggle('selected', p === prog);
+  });
+}
+
+// ── PART PICKER (Multi-Select) ──
+let selectedPartIds = new Set();
+
+function openPartPicker() {
+  window._partPickerMode = 'repair';
+  selectedPartIds.clear();
+  document.getElementById('partPickerSearch').value = '';
+  document.getElementById('partPickerCustom').value = '';
+  document.getElementById('partPickerSelectAll').checked = false;
+  updatePartPickerCount();
+  renderPartPickerTable(allStock);
+
+  // ── Dispose instance เก่าก่อนเสมอ ──
+  const modalEl = document.getElementById('partPickerModal');
+  const oldInstance = bootstrap.Modal.getInstance(modalEl);
+  if (oldInstance) oldInstance.dispose();
+
+  new bootstrap.Modal(modalEl).show();
+}
+
+function filterPartPicker() {
+  const q = document.getElementById('partPickerSearch').value.toLowerCase();
+  renderPartPickerTable(
+    allStock.filter(s =>
+      s.partName.toLowerCase().includes(q) ||
+      (s.partCode || '').toLowerCase().includes(q)
+    )
+  );
+  // sync select-all checkbox
+  syncSelectAllCheckbox();
+}
+
+function renderPartPickerTable(list) {
+  const tbody = document.getElementById('partPickerBody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">ไม่พบอะไหล่</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(s => {
+    const qty = parseFloat(s.qty) || 0;
+    const qtyColor = qty <= 0
+      ? 'color:var(--claude-danger)'
+      : qty <= (parseFloat(s.minQty) || 0)
+        ? 'color:var(--claude-warning)'
+        : 'color:var(--claude-success)';
+    const checked = selectedPartIds.has(s.id) ? 'checked' : '';
+    const rowStyle = selectedPartIds.has(s.id)
+      ? 'background:rgba(var(--claude-primary-rgb,61,90,254),0.07)'
+      : '';
+    return `<tr style="${rowStyle}">
+      <td>
+        <input type="checkbox" value="${s.id}" ${checked}
+          onchange="togglePartSelect('${s.id}', this.checked)">
+      </td>
+      <td class="text-muted small">${s.partCode || '—'}</td>
+      <td class="fw-semibold">${s.partName}</td>
+      <td class="text-end fw-bold" style="${qtyColor}">${qty}</td>
+      <td>${s.unit || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function togglePartSelect(id, checked) {
+  checked ? selectedPartIds.add(id) : selectedPartIds.delete(id);
+  updatePartPickerCount();
+  syncSelectAllCheckbox();
+  // อัป row highlight
+  renderPartPickerTable(getCurrentPickerList());
+}
+
+function toggleSelectAllParts(checkbox) {
+  const list = getCurrentPickerList();
+  list.forEach(s => {
+    checkbox.checked
+      ? selectedPartIds.add(s.id)
+      : selectedPartIds.delete(s.id);
+  });
+  updatePartPickerCount();
+  renderPartPickerTable(list);
+}
+
+function syncSelectAllCheckbox() {
+  const list = getCurrentPickerList();
+  const allChecked = list.length > 0 && list.every(s => selectedPartIds.has(s.id));
+  document.getElementById('partPickerSelectAll').checked = allChecked;
+}
+
+function getCurrentPickerList() {
+  const q = document.getElementById('partPickerSearch').value.toLowerCase();
+  return !q
+    ? allStock
+    : allStock.filter(s =>
+        s.partName.toLowerCase().includes(q) ||
+        (s.partCode || '').toLowerCase().includes(q)
+      );
+}
+
+function updatePartPickerCount() {
+  const n = selectedPartIds.size;
+  document.getElementById('partPickerSelectedCount').textContent = `เลือก ${n} รายการ`;
+  const btn = document.getElementById('confirmPartPickBtn');
+  btn.textContent = `เพิ่มรายการที่เลือก (${n})`;
+  btn.disabled = n === 0;
+  // เพิ่ม icon กลับ (textContent เขียนทับ)
+  btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>เพิ่มรายการที่เลือก (${n})`;
+}
+
+function confirmMultiPick() {
+  if (window._partPickerMode === 'oil') {
+    return;
+  }
+  // โค้ดเดิมของ Repair
+  const picked = allStock.filter(s => selectedPartIds.has(s.id));
+  picked.forEach(s => {
+    const exists = repairPartRows.find(r => r.partName === s.partName);
+    if (!exists) {
+      repairPartRows.push({ partName: s.partName, partCode: s.partCode || '', qty: 1 });
+    }
+  });
+  renderRepairParts();
+  selectedPartIds.clear();
+  bootstrap.Modal.getInstance(document.getElementById('partPickerModal')).hide();
+}
+
+function pickCustomPart() {
+  const name = document.getElementById('partPickerCustom').value.trim();
+  if (!name) return;
+  const exists = repairPartRows.find(r => r.partName === name);
+  if (!exists) {
+    repairPartRows.push({ partName: name, partCode: '', qty: 1 });
+  }
+  renderRepairParts();
+  document.getElementById('partPickerCustom').value = '';
+  bootstrap.Modal.getInstance(document.getElementById('partPickerModal')).hide();
+}
+
+// ── PO PART PICKER (Multi-Select) ──
+let selectedPOPartIds = new Set();
+
+function openPOPartPicker() {
+  selectedPOPartIds.clear();
+  document.getElementById('poPartPickerSearch').value = '';
+  document.getElementById('poPartPickerCustom').value = '';
+  document.getElementById('poPartPickerSelectAll').checked = false;
+  updatePOPartPickerCount();
+  renderPOPartPickerTable(allStock);
+  new bootstrap.Modal(document.getElementById('poPartPickerModal')).show();
+}
+
+function filterPOPartPicker() {
+  const q = document.getElementById('poPartPickerSearch').value.toLowerCase();
+  renderPOPartPickerTable(
+    allStock.filter(s =>
+      s.partName.toLowerCase().includes(q) ||
+      (s.partCode || '').toLowerCase().includes(q)
+    )
+  );
+  syncPOSelectAllCheckbox();
+}
+
+function renderPOPartPickerTable(list) {
+  const tbody = document.getElementById('poPartPickerBody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">ไม่พบอะไหล่</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(s => {
+    const qty = parseFloat(s.qty) || 0;
+    const qtyColor = qty <= 0
+      ? 'color:var(--claude-danger)'
+      : qty <= (parseFloat(s.minQty) || 0)
+        ? 'color:var(--claude-warning)'
+        : 'color:var(--claude-success)';
+    const checked = selectedPOPartIds.has(s.id) ? 'checked' : '';
+    const rowStyle = selectedPOPartIds.has(s.id)
+      ? 'background:rgba(var(--claude-primary-rgb,61,90,254),0.07)'
+      : '';
+    return `<tr style="${rowStyle}">
+      <td>
+        <input type="checkbox" value="${s.id}" ${checked}
+          onchange="togglePOPartSelect('${s.id}', this.checked)">
+      </td>
+      <td class="text-muted small">${s.partCode || '—'}</td>
+      <td class="fw-semibold">${s.partName}</td>
+      <td class="text-end fw-bold" style="${qtyColor}">${qty}</td>
+      <td>${s.unit || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function togglePOPartSelect(id, checked) {
+  checked ? selectedPOPartIds.add(id) : selectedPOPartIds.delete(id);
+  updatePOPartPickerCount();
+  syncPOSelectAllCheckbox();
+  renderPOPartPickerTable(getCurrentPOPickerList());
+}
+
+function toggleSelectAllPOParts(checkbox) {
+  const list = getCurrentPOPickerList();
+  list.forEach(s => {
+    checkbox.checked
+      ? selectedPOPartIds.add(s.id)
+      : selectedPOPartIds.delete(s.id);
+  });
+  updatePOPartPickerCount();
+  renderPOPartPickerTable(list);
+}
+
+function syncPOSelectAllCheckbox() {
+  const list = getCurrentPOPickerList();
+  const allChecked = list.length > 0 && list.every(s => selectedPOPartIds.has(s.id));
+  document.getElementById('poPartPickerSelectAll').checked = allChecked;
+}
+
+function getCurrentPOPickerList() {
+  const q = document.getElementById('poPartPickerSearch').value.toLowerCase();
+  return !q
+    ? allStock
+    : allStock.filter(s =>
+        s.partName.toLowerCase().includes(q) ||
+        (s.partCode || '').toLowerCase().includes(q)
+      );
+}
+
+function updatePOPartPickerCount() {
+  const n = selectedPOPartIds.size;
+  document.getElementById('poPartPickerSelectedCount').textContent = `เลือก ${n} รายการ`;
+  const btn = document.getElementById('confirmPOPartPickBtn');
+  btn.innerHTML = `<i class="bi bi-check-lg me-1"></i>เพิ่มรายการที่เลือก (${n})`;
+  btn.disabled = n === 0;
+}
+
+function confirmPOMultiPick() {
+  const picked = allStock.filter(s => selectedPOPartIds.has(s.id));
+  picked.forEach(s => {
+    // ไม่เพิ่มซ้ำถ้ามีในตารางแล้ว
+    const exists = poItemRows.find(r => r.partName === s.partName);
+    if (!exists) {
+      poItemRows.push({
+        partName    : s.partName,
+        qty         : 1,
+        unit        : s.unit || 'ชิ้น',
+        pricePerUnit: 0,
+        discount    : 0,
+        amount      : 0
+      });
+    }
+  });
+  renderPOItems();
+  calcPOTotal();
+  selectedPOPartIds.clear();
+  bootstrap.Modal.getInstance(document.getElementById('poPartPickerModal')).hide();
+}
+
+function pickPOCustomPart() {
+  const name = document.getElementById('poPartPickerCustom').value.trim();
+  if (!name) return;
+  const exists = poItemRows.find(r => r.partName === name);
+  if (!exists) {
+    poItemRows.push({
+      partName    : name,
+      qty         : 1,
+      unit        : 'ชิ้น',
+      pricePerUnit: 0,
+      discount    : 0,
+      amount      : 0
+    });
+  }
+  renderPOItems();
+  calcPOTotal();
+  document.getElementById('poPartPickerCustom').value = '';
+  bootstrap.Modal.getInstance(document.getElementById('poPartPickerModal')).hide();
+}
+
+// ── SHOPS ──
+
+function loadShops() {
+  google.script.run.withSuccessHandler(shops => {
+    allShops = shops || [];
+    renderShopTable(shops);
+  }).getShops();
+}
+
+function renderShopTable(shops) {
+  const tbody = document.getElementById('shopTableBody');
+  if (!tbody) return;
+  tbody.closest('table').classList.add('table-card-mobile');
+  if (!shops.length) {
+    tbody.innerHTML = '<tr><td colspan="6" data-label=""><div class="empty-state"><i class="bi bi-shop"></i>ยังไม่มีข้อมูลร้านค้า</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = shops.map(s => `
+    <tr>
+      <td data-label="ชื่อร้านค้า" class="fw-semibold">${s.name}</td>
+      <td data-label="ที่อยู่" class="text-muted small">${s.address||'—'}</td>
+      <td data-label="เลขภาษี" class="text-muted small">${s.taxId||'—'}</td>
+      <td data-label="เบอร์โทร">${s.phone||'—'}</td>
+      <td data-label="หมายเหตุ" class="text-muted small">${s.note||'—'}</td>
+      <td data-label="" class="admin-only">
+        <div class="d-flex gap-1 justify-content-end">
+          <button class="btn btn-sm btn-outline-primary" onclick="showShopModal('${s.id}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-danger" onclick="deleteShop('${s.id}')"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function filterShops() {
+  const q = document.getElementById('shopSearch').value.toLowerCase();
+  renderShopTable(allShops.filter(s =>
+    s.name.toLowerCase().includes(q) || (s.taxId||'').toLowerCase().includes(q)
+  ));
+}
+
+
+function onShopNameChange() {
+  const name = document.getElementById('poShopName').value.trim();
+  const shop = allShops.find(s => s.name === name);
+  if (shop) {
+    document.getElementById('poShopAddress').value = shop.address || '';
+    document.getElementById('poTaxId').value       = shop.taxId   || '';
+  }
+}
+
+function showShopModal(id) {
+  document.getElementById('editShopId').value  = '';
+  document.getElementById('shopName').value    = '';
+  document.getElementById('shopAddress').value = '';
+  document.getElementById('shopTaxId').value   = '';
+  document.getElementById('shopPhone').value   = '';
+  document.getElementById('shopNote').value    = '';
+  document.getElementById('shopModalTitle').innerHTML = id
+    ? '<i class="bi bi-pencil me-2"></i>แก้ไขร้านค้า'
+    : '<i class="bi bi-shop me-2"></i>เพิ่มร้านค้าใหม่';
+  if (id) {
+    const s = allShops.find(x => x.id === id);
+    if (s) {
+      document.getElementById('editShopId').value  = s.id;
+      document.getElementById('shopName').value    = s.name;
+      document.getElementById('shopAddress').value = s.address || '';
+      document.getElementById('shopTaxId').value   = s.taxId   || '';
+      document.getElementById('shopPhone').value   = s.phone   || '';
+      document.getElementById('shopNote').value    = s.note    || '';
+    }
+  }
+  new bootstrap.Modal(document.getElementById('shopModal')).show();
+}
+
+function saveShop() {
+  const shop = {
+    id:      document.getElementById('editShopId').value,
+    name:    document.getElementById('shopName').value.trim(),
+    address: document.getElementById('shopAddress').value,
+    taxId:   document.getElementById('shopTaxId').value,
+    phone:   document.getElementById('shopPhone').value,
+    note:    document.getElementById('shopNote').value
+  };
+  if (!shop.name) { showToast('warning','กรุณากรอกชื่อร้านค้า'); return; }
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success','บันทึกร้านค้าเรียบร้อย');
+        bootstrap.Modal.getInstance(document.getElementById('shopModal')).hide();
+        loadShops();
+      } else { showToast('error', res.message); }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .saveShop(shop);
+}
+
+function deleteShop(id) {
+  confirmAction('ลบร้านค้านี้?', () => {
+    showLoading('กำลังลบ...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) { showToast('success','ลบเรียบร้อย'); loadShops(); }
+        else showToast('error', res.message);
+      })
+      .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+      .deleteShop(id);
+  });
+}
+
+// function initSheets() {
+//   confirmAction('สร้าง/Reset ชีททั้งหมด? (ข้อมูลจะถูกสร้างใหม่หากยังไม่มี)', () => {
+//     showLoading('กำลังสร้าง Sheets...');
+//     google.script.run
+//       .withSuccessHandler(res => {
+//         Swal.close();
+//         if (res.success) showToast('success', res.message);
+//         else showToast('error', res.message);
+//       })
+//       .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+//       .initializeSheets();
+//   });
+// }
+
+// ── LOAD BUS PLATES (Dropdown) ──
+function loadBusPlates() {
+  google.script.run.withSuccessHandler(buses => {
+    allBuses = buses || [];
+    const poPlateEl = document.getElementById('poPlate');
+    if (poPlateEl && poPlateEl.tagName === 'SELECT') {
+      const cur = poPlateEl.value;
+      poPlateEl.innerHTML = '<option value="">-- เลือกทะเบียน --</option>' +
+        buses.map(b => `<option value="${b.plate}">${b.plate}</option>`).join('');
+      if (cur) poPlateEl.value = cur;
+    }
+  }).getBusPlates();
+}
+
+// ── GENERIC COMBOBOX ──
+function showComboList(inputId, listId, data, field) {
+  const input = document.getElementById(inputId);
+  const list  = document.getElementById(listId);
+  if (!input || !list) return;
+
+  const q = input.value.toLowerCase().trim();
+  if (!q) { closeComboList(listId); return; }
+
+  const filtered = data
+    .filter(item => String(item[field] || '').toLowerCase().includes(q))
+    .slice(0, 50);
+
+  if (!filtered.length) { closeComboList(listId); return; }
+
+  list.innerHTML = filtered.map(item => {
+    const val = String(item[field] || '');
+    const highlighted = val.replace(
+      new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),
+      '<mark>$1</mark>'
+    );
+    return `<li onmousedown="selectCombo('${inputId}','${listId}','${val.replace(/'/g,"\\'")}')">
+      ${highlighted}
+    </li>`;
+  }).join('');
+
+  list.classList.add('show');
+}
+
+function selectCombo(inputId, listId, value) {
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.value = value;
+    input.dispatchEvent(new Event('change'));
+  }
+  closeComboList(listId);
+}
+
+function closeComboList(listId) {
+  const list = document.getElementById(listId);
+  if (list) list.classList.remove('show');
+}
+
+// ปิดทุก combo เมื่อคลิกที่อื่น
+document.addEventListener('click', e => {
+  document.querySelectorAll('.combo-list.show').forEach(list => {
+    if (!list.closest('.combo-wrapper')?.contains(e.target)) {
+      list.classList.remove('show');
+    }
+  });
+});
+
+// ── OIL TEMPLATE PAGE ──
+
+function loadOilTemplate() {
+  // ── ย้าย poPartPickerModal ออกมาที่ body โดยตรง ──
+  const modal = document.getElementById('poPartPickerModal');
+  if (modal && modal.parentElement.id !== 'body' && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+
+  // โหลด bus plates สำหรับ dropdown
+  google.script.run.withSuccessHandler(buses => {
+    const sel = document.getElementById('oilPlateSelect');
+    sel.innerHTML = '<option value="">-- เลือกทะเบียน --</option>' +
+      buses.map(b => `<option value="${b.plate}">${b.plate}</option>`).join('');
+  }).getBusPlates();
+}
+
+function loadOilTemplateItems() {
+  const plate   = document.getElementById('oilPlateSelect').value;
+  const program = document.getElementById('oilProgramSelect').value;
+  if (!plate || !program) {
+    showToast('warning', 'กรุณาเลือกทะเบียนและโปรแกรม');
+    return;
+  }
+
+  showLoading('กำลังโหลด...');
+  google.script.run
+    .withSuccessHandler(items => {
+      Swal.close();
+      oilTemplateRows = items.length
+        ? items.map(i => ({
+            partName    : i.partName,
+            qty         : i.qty,
+            unit        : i.unit,
+            pricePerUnit: i.pricePerUnit || 0
+          }))
+        : [];
+      renderOilTemplateTable();
+      showToast(
+        items.length ? 'success' : 'info',
+        items.length
+          ? `โหลด ${items.length} รายการ`
+          : 'ยังไม่มีข้อมูล กรุณาเพิ่มรายการ'
+      );
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .getOilTemplateByPlateProgram(plate, program);
+}
+
+function renderOilTemplateTable() {
+  const tbody = document.getElementById('oilTemplateBody');
+  const info  = document.getElementById('oilTemplateInfo');
+
+  if (!oilTemplateRows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">
+      ยังไม่มีรายการ กดเพิ่มรายการด้านล่าง
+    </td></tr>`;
+    if (info) info.textContent = '';
+    calcOilTemplateTotal();
+    return;
+  }
+
+  if (info) info.textContent = `(${oilTemplateRows.length} รายการ)`;
+
+  tbody.innerHTML = oilTemplateRows.map((r, i) => {
+    const rowTotal = (parseFloat(r.qty) || 0) * (parseFloat(r.pricePerUnit) || 0);
+    return `
+    <tr>
+      <td class="text-muted text-center">${i + 1}</td>
+      <td>
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control"
+            value="${r.partName || ''}"
+            onchange="oilTemplateRows[${i}].partName=this.value"
+            placeholder="ชื่ออะไหล่">
+        </div>
+      </td>
+      <td>
+        <input type="number" class="form-control form-control-sm text-center"
+          value="${r.qty}" min="0" step="0.01"
+          onchange="oilTemplateRows[${i}].qty=parseFloat(this.value)||0;renderOilTemplateTable()"
+          style="width:70px">
+      </td>
+      <td>
+        <input type="text" class="form-control form-control-sm text-center"
+          value="${r.unit || 'ชิ้น'}"
+          onchange="oilTemplateRows[${i}].unit=this.value"
+          style="width:65px">
+      </td>
+      <td>
+        <input type="number" class="form-control form-control-sm text-end"
+          value="${r.pricePerUnit || 0}" min="0" step="0.01"
+          onchange="oilTemplateRows[${i}].pricePerUnit=parseFloat(this.value)||0;renderOilTemplateTable()"
+          style="width:90px">
+      </td>
+      <td class="text-end fw-semibold" style="font-size:12px;color:var(--claude-primary)">
+        ${rowTotal > 0 ? fmtNum(rowTotal) : '<span class="text-muted">—</span>'}
+      </td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-outline-danger"
+          onclick="oilTemplateRows.splice(${i},1);renderOilTemplateTable()">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  calcOilTemplateTotal();
+}
+
+function openOilPartPicker() {
+  const modal = document.getElementById('poPartPickerModal');
+  if (modal && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+
+  selectedPOPartIds.clear();
+  document.getElementById('poPartPickerSearch').value = '';
+  document.getElementById('poPartPickerCustom').value = '';
+  document.getElementById('poPartPickerSelectAll').checked = false;
+  updatePOPartPickerCount();
+
+  if (!allStock.length) {
+    showLoading('กำลังโหลดรายการอะไหล่...');
+    google.script.run
+      .withSuccessHandler(stock => {
+        Swal.close();
+        allStock = stock || [];
+        renderPOPartPickerTable(allStock);
+      })
+      .withFailureHandler(err => {
+        Swal.close();
+        showToast('error', 'โหลด Stock ไม่สำเร็จ');
+      })
+      .getStock();
+  } else {
+    renderPOPartPickerTable(allStock);
+  }
+
+  document.getElementById('confirmPOPartPickBtn').onclick = confirmOilFromPOPicker;
+  new bootstrap.Modal(modal).show();
+}
+
+function confirmOilFromPOPicker() {
+  const picked = allStock.filter(s => selectedPOPartIds.has(s.id));
+  picked.forEach(s => {
+    if (!oilTemplateRows.find(r => r.partName === s.partName)) {
+      oilTemplateRows.push({
+        partName    : s.partName,
+        qty         : 1,
+        unit        : s.unit || 'ชิ้น',
+        pricePerUnit: 0
+      });
+    }
+  });
+  renderOilTemplateTable();
+  selectedPOPartIds.clear();
+  document.getElementById('confirmPOPartPickBtn').onclick = confirmPOMultiPick;
+  bootstrap.Modal.getInstance(document.getElementById('poPartPickerModal')).hide();
+}
+
+
+function saveOilTemplate() {
+  const plate   = document.getElementById('oilPlateSelect').value;
+  const program = document.getElementById('oilProgramSelect').value;
+  if (!plate || !program) {
+    showToast('warning', 'กรุณาเลือกทะเบียนและโปรแกรม'); return;
+  }
+  if (!oilTemplateRows.length) {
+    showToast('warning', 'กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ'); return;
+  }
+  const invalid = oilTemplateRows.find(r => !r.partName);
+  if (invalid) {
+    showToast('warning', 'กรุณากรอกชื่ออะไหล่ให้ครบ'); return;
+  }
+
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success',
+          `บันทึกโปรแกรม ${program} ของ ${plate} (${oilTemplateRows.length} รายการ)`
+        );
+      } else {
+        showToast('error', res.message);
+      }
+    })
+    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .saveOilTemplate(plate, program, oilTemplateRows);
+}
+// ── เมื่อเปลี่ยนทะเบียน แสดงโปรแกรมที่ตั้งค่าแล้ว ──
+function onOilPlateChange() {
+  const plate = document.getElementById('oilPlateSelect').value;
+  const box   = document.getElementById('oilExistingPrograms');
+  const badges = document.getElementById('oilExistingProgramBadges');
+
+  if (!plate) { box.classList.add('d-none'); return; }
+
+  google.script.run
+    .withSuccessHandler(programs => {
+      if (!programs.length) { box.classList.add('d-none'); return; }
+      box.classList.remove('d-none');
+      badges.innerHTML = programs.map(p => `
+        <span class="badge rounded-pill"
+          style="background:var(--claude-primary);cursor:pointer;font-size:12px"
+          onclick="quickLoadProgram('${p}')"
+          title="คลิกเพื่อโหลดโปรแกรม ${p}">
+          <i class="bi bi-droplet-fill me-1"></i>${p}
+        </span>`).join('');
+    })
+    .withFailureHandler(() => box.classList.add('d-none'))
+    .getOilProgramsByPlate(plate);
+}
+
+// ── คลิก badge โปรแกรมเพื่อโหลดทันที ──
+function quickLoadProgram(program) {
+  document.getElementById('oilProgramSelect').value = program;
+  loadOilTemplateItems();
+}
+
+// ── คำนวณรวมราคา ──
+function calcOilTemplateTotal() {
+  const total = oilTemplateRows.reduce((s, r) =>
+    s + ((parseFloat(r.qty) || 0) * (parseFloat(r.pricePerUnit) || 0)), 0
+  );
+  const el = document.getElementById('oilTemplateTotal');
+  const foot = document.getElementById('oilTemplateFoot');
+  if (el) el.textContent = fmtNum(total);
+  if (foot) foot.classList.toggle('d-none', total === 0);
+}
+
+
+// ── Notification Bell ──
+
+function loadNotifications() {
+  google.script.run
+    .withSuccessHandler(notifs => {
+      allNotifications = notifs || [];
+      renderNotificationBell();
+    })
+    .getNotifications();
+}
+
+function renderNotificationBell() {
+  const unread = allNotifications.filter(n => !readNotifIds.has(n.id));
+  const badge  = document.getElementById('notifBadge');
+  const list   = document.getElementById('notifList');
+
+  // Badge count
+  badge.textContent = unread.length;
+  badge.style.display = unread.length ? '' : 'none';
+
+  // Dropdown list
+  const iconMap = {
+    po_approved    : { icon: 'check-circle-fill', color: '#10B981' },
+    repair_approved: { icon: 'wrench-adjustable',  color: '#3B82F6' },
+    po_pending     : { icon: 'hourglass-split',    color: '#F59E0B' },
+    stock_low      : { icon: 'exclamation-triangle-fill', color: '#EF4444' }
+  };
+
+  list.innerHTML = allNotifications.length
+    ? allNotifications.slice(0, 10).map(n => {
+        const ico     = iconMap[n.type] || { icon: 'bell', color: '#6B7280' };
+        const isRead  = readNotifIds.has(n.id);
+        return `
+        <div class="notif-item ${isRead ? 'read' : 'unread'}"
+          onclick="clickNotif('${n.id}','${n.action}','${n.ref}')">
+          <div class="notif-icon" style="color:${ico.color}">
+            <i class="bi bi-${ico.icon}"></i>
+          </div>
+          <div class="notif-content">
+            <div class="notif-title">${n.title}</div>
+            <div class="notif-body">${n.body}</div>
+          </div>
+          ${!isRead ? '<div class="notif-dot"></div>' : ''}
+        </div>`;
+      }).join('')
+    : '<div class="text-center text-muted py-3 small">ไม่มีการแจ้งเตือน</div>';
+}
+
+function clickNotif(id, action, ref) {
+  // Mark as read
+  readNotifIds.add(id);
+  sessionStorage.setItem('readNotifs', JSON.stringify([...readNotifIds]));
+  renderNotificationBell();
+
+  // ปิด dropdown
+  document.getElementById('notifDropdown').classList.remove('show');
+
+  // Navigate
+  navigateTo(action);
+  if (action === 'po') {
+    setTimeout(() => editPO(ref), 400);
+  } else if (action === 'repairs') {
+    setTimeout(() => editRepair(ref), 400);
+  }
+}
+
+function markAllRead() {
+  allNotifications.forEach(n => readNotifIds.add(n.id));
+  sessionStorage.setItem('readNotifs', JSON.stringify([...readNotifIds]));
+  renderNotificationBell();
+}
+
+function toggleNotifDropdown() {
+  document.getElementById('notifDropdown').classList.toggle('show');
+}
+
+// ปิด dropdown เมื่อคลิกที่อื่น
+document.addEventListener('click', e => {
+  if (!e.target.closest('#notifWrapper')) {
+    document.getElementById('notifDropdown')?.classList.remove('show');
+  }
+});
+
+// Auto refresh ทุก 2 นาที
+setInterval(loadNotifications, 120000);
+
+// ── LINE SESSION ──
+
+function promptSendToLine(type, id) {
+  // เช็คก่อนว่าเคยส่งหรือยัง
+  const checkFn = type === 'repair' ? 'sendRepairToLine' : 'sendPOToLine';
+  
+  Swal.fire({
+    title            : 'ส่งแจ้งเข้า Line?',
+    text             : `ต้องการส่งขออนุมัติ ${id} เข้า Line กลุ่มหรือไม่?`,
+    icon             : 'question',
+    showCancelButton : true,
+    confirmButtonText: '📲 ส่ง Line',
+    cancelButtonText : 'ไม่ส่ง'
+  }).then(r => {
+    if (!r.isConfirmed) return;
+    showLoading('กำลังส่ง Line...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+
+        // กรณีเคยส่งไปแล้ว
+        if (res.alreadySent) {
+          const sentDate = res.sentAt
+            ? new Date(res.sentAt).toLocaleString('th-TH')
+            : 'ก่อนหน้านี้';
+
+          Swal.fire({
+            icon             : 'warning',
+            title            : 'เคยส่งไปแล้ว',
+            html             : `<div style="font-size:14px">
+                                  <b>${id}</b> ถูกส่ง Line ไปแล้วเมื่อ<br>
+                                  <span style="color:#d97706">${sentDate}</span><br><br>
+                                  ต้องการส่งซ้ำอีกครั้งหรือไม่?
+                                </div>`,
+            showCancelButton : true,
+            confirmButtonText: '📲 ส่งซ้ำ',
+            cancelButtonText : 'ยกเลิก',
+            confirmButtonColor: '#d97706'
+          }).then(r2 => {
+            if (!r2.isConfirmed) return;
+            // force ส่งซ้ำ
+            showLoading('กำลังส่ง Line...');
+            const forceFn = type === 'repair'
+              ? 'forceSendRepairToLine'
+              : 'forceSendPOToLine';
+            google.script.run
+              .withSuccessHandler(res2 => {
+                Swal.close();
+                showToast(
+                  res2.success ? 'success' : 'error',
+                  res2.success ? 'ส่ง Line เรียบร้อย' : (res2.message || 'ส่งไม่สำเร็จ')
+                );
+              })
+              .withFailureHandler(err => { Swal.close(); showToast('error', err.message); })
+              [forceFn](id);
+          });
+          return;
+        }
+
+        showToast(
+          res.success ? 'success' : 'error',
+          res.success ? 'ส่ง Line เรียบร้อย' : (res.message || 'ส่งไม่สำเร็จ')
+        );
+      })
+      .withFailureHandler(err => { Swal.close(); showToast('error', err.message); })
+      [checkFn](id);
+  });
+}
+
+// ── AUTO RESTORE SESSION ──
+(function() {
+  const saved = sessionStorage.getItem('currentUser');
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      initApp();
+    } catch(e) {
+      sessionStorage.removeItem('currentUser');
+    }
+  }
+})();
+</script>

@@ -1,0 +1,210 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-bus-front me-2" style="color:var(--claude-primary)"></i>จัดการรถบัส</h2>
+    <p class="page-subtitle">เพิ่ม แก้ไข ลบ ข้อมูลรถบัสทั้งหมด</p>
+  </div>
+  <button class="btn btn-primary admin-only" onclick="showBusModal()">
+    <i class="bi bi-plus-lg me-1"></i>เพิ่มรถบัส
+  </button>
+</div>
+
+<!-- Stats Row -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon blue"><i class="bi bi-bus-front"></i></div>
+      <div>
+        <div class="stat-value" id="busTotalCount">—</div>
+        <div class="stat-label">รถทั้งหมด</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon green"><i class="bi bi-wrench-adjustable-circle"></i></div>
+      <div>
+        <div class="stat-value" id="busInRepair">—</div>
+        <div class="stat-label">อยู่ระหว่างซ่อม</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon orange"><i class="bi bi-hourglass-split"></i></div>
+      <div>
+        <div class="stat-value" id="busWaitingParts">—</div>
+        <div class="stat-label">รออะไหล่</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon yellow"><i class="bi bi-check2-circle"></i></div>
+      <div>
+        <div class="stat-value" id="busReady">—</div>
+        <div class="stat-label">พร้อมใช้งาน</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="search-bar">
+  <input type="text" id="busSearch" class="form-control" placeholder="ค้นหาทะเบียน / เลขคัสซี / รุ่น..." oninput="filterBuses()">
+</div>
+
+<!-- Bus Cards / Table Toggle -->
+<div class="d-flex gap-2 mb-3 align-items-center">
+  <span class="text-muted small">แสดงผล:</span>
+  <div class="btn-group btn-group-sm">
+    <button class="btn btn-outline-secondary active" id="viewTableBtn" onclick="setBusView('table')">
+      <i class="bi bi-table me-1"></i>ตาราง
+    </button>
+    <button class="btn btn-outline-secondary" id="viewCardBtn" onclick="setBusView('card')">
+      <i class="bi bi-grid-3x3-gap me-1"></i>การ์ด
+    </button>
+  </div>
+</div>
+
+<!-- TABLE VIEW -->
+<div id="busTableView">
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>ป้ายทะเบียน</th>
+              <th>เลขคัสซี</th>
+              <th>รุ่น / ยี่ห้อ</th>
+              <th>ปีที่ผลิต</th>
+              <th>สถานะล่าสุด</th>
+              <th>ประวัติซ่อม</th>
+              <th class="text-center admin-only">จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="busTableBody">
+            <tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CARD VIEW -->
+<div id="busCardView" class="d-none">
+  <div class="row g-3" id="busCardBody">
+    <div class="col-12 text-center text-muted py-5">กำลังโหลดข้อมูล...</div>
+  </div>
+</div>
+
+<!-- Bus Modal -->
+<div class="modal fade" id="busModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="busModalTitle">
+          <i class="bi bi-bus-front me-2"></i>เพิ่ม/แก้ไขรถบัส
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editBusOldPlate">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">ป้ายทะเบียน <span class="text-danger">*</span></label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-card-text"></i></span>
+              <input type="text" id="busPlate" class="form-control" placeholder="เช่น 10-1234 กทม" required>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">เลขคัสซี</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-upc"></i></span>
+              <input type="text" id="busChassis" class="form-control" placeholder="เลขคัสซี">
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">รุ่น / ยี่ห้อ</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-tag"></i></span>
+              <input type="text" id="busModel" class="form-control" placeholder="เช่น Hino / Isuzu">
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">ปีที่ผลิต</label>
+            <input type="number" id="busYear" class="form-control" placeholder="เช่น 2563" min="2500" max="2600">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">สี</label>
+            <input type="text" id="busColor" class="form-control" placeholder="เช่น ขาว-แดง">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">เลขทะเบียนเครื่องยนต์</label>
+            <input type="text" id="busEngineNo" class="form-control" placeholder="เลขเครื่องยนต์">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">วันที่ตรวจสภาพครั้งล่าสุด</label>
+            <input type="date" id="busLastInspect" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">วันที่ต่อทะเบียนถึง</label>
+            <input type="date" id="busRegExpiry" class="form-control">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">วันที่ประกันภัยถึง</label>
+            <input type="date" id="busInsuranceExpiry" class="form-control">
+          </div>
+          <div class="col-12">
+            <label class="form-label">หมายเหตุ</label>
+            <textarea id="busNote" class="form-control" rows="2" placeholder="หมายเหตุเพิ่มเติม"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveBusFromPage()">
+          <i class="bi bi-save me-1"></i>บันทึก
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bus History Modal -->
+<div class="modal fade" id="busHistoryModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-clock-history me-2"></i>ประวัติการซ่อม: <span id="busHistoryPlate"></span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>เลขที่ซ่อม</th>
+              <th>วันที่</th>
+              <th>รายการซ่อม</th>
+              <th>เลขไมล์</th>
+              <th>สถานะ</th>
+            </tr>
+          </thead>
+          <tbody id="busHistoryBody">
+            <tr><td colspan="5" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ปิด</button>
+        <button class="btn btn-primary" onclick="navigateTo('repairs');bootstrap.Modal.getInstance(document.getElementById('busHistoryModal')).hide()">
+          <i class="bi bi-plus-lg me-1"></i>แจ้งซ่อมใหม่
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

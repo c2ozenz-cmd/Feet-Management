@@ -1,0 +1,51 @@
+<nav class="topbar">
+  <button class="topbar-toggle me-2" id="sidebarToggle">
+    <i class="bi bi-list fs-5"></i>
+  </button>
+  <a class="topbar-brand" href="#" onclick="navigateTo('dashboard')">
+    <div class="brand-icon"><i class="bi bi-bus-front-fill"></i></div>
+    <span class="d-none d-md-inline">Bus Repair</span>
+  </a>
+
+  <div class="topbar-right">
+        <!-- Notification Bell -->
+    <div id="notifWrapper" style="position:relative">
+      <button class="btn btn-link p-1 position-relative" onclick="toggleNotifDropdown()"
+        style="color:var(--claude-text);font-size:18px;text-decoration:none">
+        <i class="bi bi-bell"></i>
+        <span id="notifBadge"
+          style="display:none;position:absolute;top:0;right:0;
+                background:#EF4444;color:#fff;border-radius:50%;
+                font-size:10px;width:16px;height:16px;
+                display:flex;align-items:center;justify-content:center;
+                font-weight:700;line-height:1">
+        </span>
+      </button>
+
+      <!-- Dropdown -->
+      <div id="notifDropdown"
+        style="display:none;position:absolute;right:0;top:calc(100% + 4px);
+              width:300px;background:#fff;border-radius:10px;
+              box-shadow:0 4px 24px rgba(0,0,0,0.12);z-index:9999;
+              border:1px solid var(--claude-border)">
+        <div style="padding:10px 14px;border-bottom:1px solid var(--claude-border);
+                    display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:600;font-size:13px">การแจ้งเตือน</span>
+          <button class="btn btn-link btn-sm p-0" onclick="markAllRead()"
+            style="font-size:11px;color:var(--claude-primary)">
+            อ่านทั้งหมด
+          </button>
+        </div>
+        <div id="notifList" style="max-height:360px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div class="user-badge">
+      <i class="bi bi-person-circle"></i>
+      <span id="topbarUserName">—</span>
+      <span class="role-badge" id="topbarRoleBadge">—</span>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" onclick="logout()" title="ออกจากระบบ">
+      <i class="bi bi-box-arrow-right"></i>
+    </button>
+  </div>
+</nav>

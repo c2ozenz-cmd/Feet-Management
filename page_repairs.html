@@ -1,0 +1,273 @@
+<!-- REPAIR LIST VIEW -->
+<div id="repairListView">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title"><i class="bi bi-tools me-2" style="color:var(--claude-primary)"></i>แจ้งซ่อมรถบัส</h2>
+      <p class="page-subtitle">จัดการรายการแจ้งซ่อมทั้งหมด</p>
+    </div>
+    <button class="btn btn-primary" onclick="showRepairForm()">
+      <i class="bi bi-plus-lg me-1"></i>แจ้งซ่อมใหม่
+    </button>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="repairSearch" class="form-control" placeholder="ค้นหาเลขที่ / ทะเบียน..." oninput="filterRepairs()">
+    <select id="repairStatusFilter" class="form-select" style="max-width:180px" onchange="filterRepairs()">
+      <option value="">ทุกสถานะ</option>
+      <option value="รอดำเนินการ">รอดำเนินการ</option>
+      <option value="กำลังซ่อม">กำลังซ่อม</option>
+      <option value="รออะไหล่">รออะไหล่</option>
+      <option value="เสร็จแล้ว">เสร็จแล้ว</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>เลขที่แจ้งซ่อม</th>
+              <th>วันที่</th>
+              <th>ทะเบียน</th>
+              <th>โปรแกรมน้ำมัน</th>
+              <th>รายการซ่อม</th>
+              <th>สถานะ</th>
+              <th class="text-center">จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="repairTableBody">
+            <tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REPAIR FORM VIEW -->
+<div id="repairFormView" class="d-none">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title"><i class="bi bi-tools me-2" style="color:var(--claude-primary)"></i>
+        <span id="repairFormTitle">แจ้งซ่อมใหม่</span>
+      </h2>
+      <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+          <li class="breadcrumb-item"><a href="#" onclick="showRepairList()">รายการซ่อม</a></li>
+          <li class="breadcrumb-item active" id="repairFormBreadcrumb">ใหม่</li>
+        </ol>
+      </nav>
+    </div>
+    <button class="btn btn-outline-secondary" onclick="showRepairList()">
+      <i class="bi bi-arrow-left me-1"></i>กลับ
+    </button>
+  </div>
+
+  <input type="hidden" id="editRepairNo">
+
+  <!-- Card 1 -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon"><i class="bi bi-card-list"></i></div>ข้อมูลการแจ้งซ่อม
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label">เลขที่แจ้งซ่อม</label>
+          <input type="text" id="repairNo" class="form-control" placeholder="สร้างอัตโนมัติ" readonly
+            style="background:var(--claude-bg);color:var(--claude-text-muted)">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">วันที่แจ้ง <span class="text-danger">*</span></label>
+          <input type="date" id="repairDate" class="form-control" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">ป้ายทะเบียน <span class="text-danger">*</span></label>
+          <div class="combo-wrapper">
+            <input type="text" id="repairPlate" class="form-control"
+              placeholder="พิมพ์หรือเลือกทะเบียน..."
+              oninput="showComboList('repairPlate','plateComboList', allBuses, 'plate')"
+              onchange="onPlateChange()"
+              autocomplete="off"
+              required>
+            <ul id="plateComboList" class="combo-list"></ul>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">เลขคัสซี</label>
+          <input type="text" id="repairChassis" class="form-control" placeholder="เลขคัสซี">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">เลขไมล์</label>
+          <input type="number" id="repairMileage" class="form-control" placeholder="เลขไมล์">
+        </div>
+        <div class="col-12">
+          <label class="form-label">รายการซ่อม <span class="text-danger">*</span></label>
+          <textarea id="repairList" class="form-control" rows="3" placeholder="ระบุรายการซ่อม..." required></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label">
+            ผลการซ่อม / รายละเอียดการดำเนินการ
+          </label>
+
+          <textarea
+            id="repairSummary"
+            class="form-control"
+            rows="4"
+            placeholder="ระบุสิ่งที่ช่างได้ดำเนินการ เช่น เปลี่ยนอะไหล่ ตรวจเช็ค ทดลองวิ่ง ฯลฯ">
+          </textarea>
+
+          <div class="form-text">
+            ใช้สำหรับบันทึกประวัติการซ่อมย้อนหลัง
+          </div>
+        </div>
+
+        <!-- ✅ Oil Program -->
+        <div class="col-12">
+          <label class="form-label">
+            <i class="bi bi-droplet-fill me-1" style="color:var(--claude-warning)"></i>
+            โปรแกรมเปลี่ยนถ่ายน้ำมันเครื่อง
+            <span class="text-muted small ms-1">(เลือกได้ 1 รายการ)</span>  
+          </label>
+          <div class="oil-program-group">
+            <div class="oil-program-card" id="oilCard_S" onclick="toggleOilProgram('S')">
+              <i class="bi bi-droplet"></i><span>S</span><small>โปรแกรม S</small>
+            </div>
+            <div class="oil-program-card" id="oilCard_M" onclick="toggleOilProgram('M')">
+              <i class="bi bi-droplet-half"></i><span>M</span><small>โปรแกรม M</small>
+            </div>
+            <div class="oil-program-card" id="oilCard_S2" onclick="toggleOilProgram('S2')">
+              <i class="bi bi-droplet-fill"></i><span>S2</span><small>โปรแกรม S2</small>
+            </div>
+            <div class="oil-program-card" id="oilCard_L" onclick="toggleOilProgram('L')">
+              <i class="bi bi-moisture"></i><span>L</span><small>โปรแกรม L</small>
+            </div>
+          </div>
+          <input type="hidden" id="repairOilProgram">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 2: อะไหล่ -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon"><i class="bi bi-gear"></i></div>
+      รายการอะไหล่ที่ใช้
+      <button class="btn btn-sm btn-outline-primary ms-auto" onclick="openPartPicker()">
+        <i class="bi bi-plus-lg me-1"></i>เพิ่มอะไหล่
+      </button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th style="width:50px">ลำดับ</th>
+              <th>รายการอะไหล่</th>
+              <th style="width:90px">รหัส</th>
+              <th style="width:110px">จำนวน</th>
+              <th style="width:50px"></th>
+            </tr>
+          </thead>
+          <tbody id="repairPartsBody">
+            <tr id="repairPartsEmpty">
+              <td colspan="5" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 3: สถานะ -->
+  <div class="card" id="repairStatusCard" style="display:none!important">
+    <div class="card-header">
+      <div class="card-icon"><i class="bi bi-diagram-3"></i></div>สถานะการซ่อม
+    </div>
+    <div class="card-body">
+      <div class="repair-stepper" id="repairStepperForm"></div>
+      <div class="mt-3 d-flex gap-2 flex-wrap admin-only">
+        <button class="btn btn-sm btn-outline-secondary" onclick="changeRepairStatus('รอดำเนินการ')"><i class="bi bi-clock me-1"></i>รอดำเนินการ</button>
+        <button class="btn btn-sm btn-warning" onclick="changeRepairStatus('กำลังซ่อม')"><i class="bi bi-gear me-1"></i>กำลังซ่อม</button>
+        <button class="btn btn-sm btn-secondary" onclick="changeRepairStatus('รออะไหล่')"><i class="bi bi-box me-1"></i>รออะไหล่</button>
+        <button class="btn btn-sm btn-success" onclick="changeRepairStatus('เสร็จแล้ว')"><i class="bi bi-check-circle me-1"></i>เสร็จแล้ว</button>
+        <button class="btn btn-sm btn-info" onclick="createPOFromRepair()" id="createPOBtn" style="display:none">
+          <i class="bi bi-file-earmark-plus me-1"></i>สร้าง PO
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 justify-content-end">
+    <button class="btn btn-outline-secondary" onclick="showRepairList()"><i class="bi bi-x-lg me-1"></i>ยกเลิก</button>
+    <button class="btn btn-primary" onclick="saveRepair()"><i class="bi bi-save me-1"></i>บันทึก</button>
+  </div>
+</div>
+
+<!-- ✅ Part Picker Modal (Multi-Select) -->
+<div class="modal fade" id="partPickerModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-gear me-2"></i>เลือกอะไหล่จาก Stock</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex gap-2 mb-3 align-items-center">
+          <input type="text" id="partPickerSearch" class="form-control form-control-sm"
+            placeholder="ค้นหาอะไหล่..." oninput="filterPartPicker()">
+          <span id="partPickerSelectedCount"
+            class="badge rounded-pill flex-shrink-0"
+            style="background:var(--claude-primary);font-size:12px;white-space:nowrap">
+            เลือก 0 รายการ
+          </span>
+        </div>
+
+        <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+          <table class="table table-hover mb-0" style="font-size:13px">
+            <thead style="position:sticky;top:0;background:var(--claude-bg);z-index:1">
+              <tr>
+                <th style="width:36px">
+                  <input type="checkbox" id="partPickerSelectAll"
+                    onchange="toggleSelectAllParts(this)">
+                </th>
+                <th>รหัส</th>
+                <th>ชื่ออะไหล่</th>
+                <th class="text-end">คงเหลือ</th>
+                <th>หน่วย</th>
+              </tr>
+            </thead>
+            <tbody id="partPickerBody"></tbody>
+          </table>
+        </div>
+
+        <!-- พิมพ์เองถ้าไม่มีในรายการ -->
+        <div class="mt-3 p-3 rounded"
+          style="background:var(--claude-bg);border:1px dashed var(--claude-border)">
+          <div class="text-muted small mb-2">
+            <i class="bi bi-pencil me-1"></i>ไม่มีในรายการ? พิมพ์ชื่ออะไหล่หรือรายการซ่อม
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" id="partPickerCustom" class="form-control form-control-sm"
+              placeholder="พิมพ์ชื่ออะไหล่ใหม่หรือรายการซ่อม"
+              onkeypress="if(event.key==='Enter') pickCustomPart()">
+            <button class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="pickCustomPart()">
+              <i class="bi bi-plus-lg me-1"></i>เพิ่ม
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" id="confirmPartPickBtn"
+          onclick="confirmMultiPick()" disabled>
+          <i class="bi bi-check-lg me-1"></i>เพิ่มรายการที่เลือก (0)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+

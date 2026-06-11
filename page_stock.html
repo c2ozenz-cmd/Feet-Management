@@ -1,0 +1,256 @@
+<!-- ✅ แบบนี้ถูก -->
+<div class="page-header">
+  <div>
+    <h2 class="page-title">Stock อะไหล่</h2>
+    <p class="page-subtitle">จัดการอะไหล่ทั้งหมด</p>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-danger" onclick="showDeductModal()">
+      <i class="bi bi-scissors me-1"></i>ตัดอะไหล่
+    </button>
+    <button class="btn btn-primary admin-only" onclick="showStockModal()">
+      <i class="bi bi-plus-lg me-1"></i>เพิ่มอะไหล่
+    </button>
+  </div>
+</div>
+
+<!-- Stats Row -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon blue"><i class="bi bi-boxes"></i></div>
+      <div>
+        <div class="stat-value" id="stockTotalItems">—</div>
+        <div class="stat-label">รายการทั้งหมด</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
+      <div>
+        <div class="stat-value" id="stockInStock">—</div>
+        <div class="stat-label">มีในคลัง</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon yellow"><i class="bi bi-exclamation-triangle"></i></div>
+      <div>
+        <div class="stat-value" id="stockLow">—</div>
+        <div class="stat-label">ใกล้หมด</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-icon orange"><i class="bi bi-x-circle"></i></div>
+      <div>
+        <div class="stat-value" id="stockOut">—</div>
+        <div class="stat-label">หมดสต็อก</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="search-bar">
+  <input type="text" id="stockSearch" class="form-control" placeholder="ค้นหาอะไหล่..." oninput="filterStock()">
+  <select id="stockStatusFilter" class="form-select" style="max-width:180px" onchange="filterStock()">
+    <option value="">ทุกสถานะ</option>
+    <option value="ok">มีพอ</option>
+    <option value="low">ใกล้หมด</option>
+    <option value="out">หมด</option>
+  </select>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>รหัสอะไหล่</th>
+            <th>ชื่ออะไหล่</th>
+            <th>หน่วย</th>
+            <th class="text-end">จำนวนคงเหลือ</th>
+            <th class="text-end">จำนวนขั้นต่ำ</th>
+            <th>สถานที่เก็บ</th>
+            <th>สถานะ</th>
+            <th class="text-center admin-only">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="stockTableBody">
+          <tr><td colspan="8" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Stock Log -->
+<div class="card mt-3">
+  <div class="card-header">
+    <div class="card-icon"><i class="bi bi-journal-text"></i></div>
+    ประวัติความเคลื่อนไหวอะไหล่
+    <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadStockLog()">
+      <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรช
+    </button>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>วันที่/เวลา</th>
+            <th>ประเภท</th>
+            <th>อะไหล่</th>
+            <th class="text-end">จำนวน</th>
+            <th>อ้างอิง</th>
+          </tr>
+        </thead>
+        <tbody id="stockLogBody">
+          <tr><td colspan="5" class="text-center text-muted py-3">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Stock Modal -->
+<div class="modal fade" id="stockModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="stockModalTitle">เพิ่ม/แก้ไขอะไหล่</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="stockItemId">
+        <div class="row g-3">
+          <div class="col-6">
+            <label class="form-label">รหัสอะไหล่</label>
+            <input type="text" id="stockPartCode" class="form-control" placeholder="รหัสอะไหล่">
+          </div>
+          <div class="col-6">
+            <label class="form-label">ชื่ออะไหล่ <span class="text-danger">*</span></label>
+            <input type="text" id="stockPartName" class="form-control" required placeholder="ชื่ออะไหล่">
+          </div>
+          <div class="col-6">
+            <label class="form-label">หน่วย</label>
+            <input type="text" id="stockUnit" class="form-control" placeholder="ชิ้น / อัน / กิโลกรัม">
+          </div>
+          <div class="col-6">
+            <label class="form-label">จำนวนคงเหลือ</label>
+            <input type="number" id="stockQty" class="form-control" placeholder="0" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">จำนวนขั้นต่ำ</label>
+            <input type="number" id="stockMinQty" class="form-control" placeholder="0" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">สถานที่เก็บ</label>
+            <input type="text" id="stockLocation" class="form-control" placeholder="ชั้น / ตู้ / ห้อง">
+          </div>
+          <div class="col-12">
+            <label class="form-label">หมายเหตุ</label>
+            <input type="text" id="stockNote" class="form-control" placeholder="หมายเหตุ">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="saveStockItem()">
+          <i class="bi bi-save me-1"></i>บันทึก
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal ตัดอะไหล่ Manual -->
+<div class="modal fade" id="deductStockModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-scissors me-2" style="color:var(--claude-danger)"></i>
+          ตัดอะไหล่ออกจาก Stock
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- ข้อมูลหัว -->
+        <div class="row g-3 mb-3">
+          <div class="col-sm-4">
+            <label class="form-label">วันที่ <span class="text-danger">*</span></label>
+            <input type="date" id="deductDate" class="form-control">
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label">ทะเบียนรถ <span class="text-danger">*</span></label>
+            <div class="combo-wrapper">
+              <input type="text" id="deductPlate" class="form-control"
+                placeholder="พิมพ์หรือเลือกทะเบียน"
+                oninput="showComboList('deductPlate','deductPlateList', allBuses, 'plate')"
+                onblur="setTimeout(()=>closeComboList('deductPlateList'),200)">
+              <ul class="combo-list" id="deductPlateList"></ul>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label">หมายเหตุ</label>
+            <input type="text" id="deductNote" class="form-control" placeholder="เช่น ซ่อมนอกสถานที่">
+          </div>
+        </div>
+
+        <!-- ตารางรายการ -->
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="fw-semibold" style="color:var(--claude-secondary)">
+            รายการอะไหล่
+          </span>
+          <button class="btn btn-sm btn-outline-primary" onclick="openDeductPicker()">
+            <i class="bi bi-search me-1"></i>เลือกจาก Stock
+          </button>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr>
+                <th style="width:36px">#</th>
+                <th>ชื่ออะไหล่</th>
+                <th style="width:80px">คงเหลือ</th>
+                <th style="width:90px">ตัดออก</th>
+                <th style="width:60px">หน่วย</th>
+                <th style="width:40px"></th>
+              </tr>
+            </thead>
+            <tbody id="deductItemsBody">
+              <tr id="deductEmptyRow">
+                <td colspan="6" class="text-center text-muted py-3">
+                  กดเลือกจาก Stock ด้านบน
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- สรุป -->
+        <div id="deductSummary" class="d-none mt-3 p-3 rounded"
+          style="background:rgba(192,80,80,0.06);border:1px solid rgba(192,80,80,0.2)">
+          <div class="fw-semibold mb-1" style="color:var(--claude-danger)">
+            <i class="bi bi-exclamation-triangle me-1"></i>สรุปการตัดสต็อก
+          </div>
+          <div id="deductSummaryList" class="small"></div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-danger" onclick="confirmDeductStock()">
+          <i class="bi bi-scissors me-1"></i>ยืนยันตัดอะไหล่
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
