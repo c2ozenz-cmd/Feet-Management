@@ -151,7 +151,8 @@ function generateAndSavePOPdf(poNo) {
       plate       : poRaw['Plate']       || '',
       vatType     : poRaw['VatType']     || 'none',
       createdBy   : poRaw['CreatedBy']   || '',
-      createdBySignatureUrl: poRaw['createdBySignatureUrl'] || getUserSignatureByName(poRaw['CreatedBy'] || '')
+      createdBySignatureUrl: poRaw['createdBySignatureUrl'] || getUserSignatureByName(poRaw['CreatedBy'] || ''),
+      approvedAt  : poRaw['approvedAt']   || ''
     };
 
     const approvedBy = String(poRaw['approvedBy'] || '');
@@ -407,11 +408,13 @@ function renderRows(chunk, startIdx) {
 }
 
 
+  const creatorSigUrl = po.createdBySignatureUrl || getUserSignatureByName(po.createdBy || '');
+  const creatorSigBase64 = creatorSigUrl ? imageUrlToBase64(creatorSigUrl) : '';
   const sigBase64 = sigUrl ? imageUrlToBase64(sigUrl) : '';
 
   const sigBoxes = [
-    { role: 'ผู้ขอ',           name: po.createdBy || '', img: po.createdBySignatureUrl || getUserSignatureByName(po.createdBy || ''), stamp: false, issueDate: po.issueDate || '' },
-    { role: 'ผู้อนุมัติ',       name: approvedBy   || '', img: sigBase64, stamp: false },
+    { role: 'ผู้ขอ',           name: po.createdBy || '', img: creatorSigBase64, stamp: false, issueDate: po.issueDate || '' },
+    { role: 'ผู้อนุมัติ',       name: approvedBy   || '', img: sigBase64, stamp: false, issueDate: po.approvedAt || '' },
     { role: 'ผู้มีอำนาจลงนาม', name: '',                 img: '',        stamp: true  }
   ];
 

@@ -215,21 +215,9 @@ function handlePostback(event) {
         const plate   = po?.plate || ''; 
         const token   = getLineToken();
         const groupId = getLineGroupId('po');
-        const messages = [buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl)];
-        if (pdfUrl) {
-          messages.push({
-            type: 'text',
-            text: `📄 PDF ใหม่พร้อมลายเซ็น: ${pdfUrl}`
-          });
-        } else if (pdfRes && !pdfRes.success) {
-          messages.push({
-            type: 'text',
-            text: `⚠️ สร้าง PDF ใหม่ไม่สำเร็จ: ${pdfRes.message || 'ไม่ทราบสาเหตุ'}`
-          });
-        }
         callLineAPI('https://api.line.me/v2/bot/message/push', {
           to      : groupId,
-          messages
+          messages: [buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl)]
         }, token);
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);

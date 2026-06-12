@@ -461,7 +461,8 @@ function getPOs() {
         approvedBy  : String(poRaw.approvedBy || ''),
         approvedAt  : String(poRaw.approvedAt || ''),
         lineSentAt  : String(poRaw.lineSentAt || ''),
-        pdfUrl      : String(poRaw.pdfUrl || '')
+        pdfUrl      : String(poRaw.pdfUrl || ''),
+        printedAt   : String(poRaw.printedAt || '')
       };
     });
   } catch (e) { return []; }
@@ -1595,7 +1596,7 @@ function initializeSheets() {
     [SHEETS.buses]    : ['Plate', 'Chassis', 'Model', 'Year', 'Color', 'EngineNo', 'LastInspect', 'RegExpiry', 'InsuranceExpiry', 'Note'],
     [SHEETS.repairs]  : ['RepairNo', 'Date', 'Plate', 'Chassis', 'Mileage', 'RepairList','repairSummary', 'Status', 'CreatedBy', 'CreatedAt'],
     [SHEETS.parts]    : ['RepairNo', 'PartName', 'Qty'],
-    [SHEETS.po] : ['PONo', 'ShopName', 'ShopAddress', 'TaxID', 'IssueDate', 'QuoteDate', 'RefRepairNo', 'QuoteNo', 'Plate', 'VatType', 'Status', 'CreatedBy', 'CreatedAt', 'createdBySignatureUrl', 'approvedBy', 'approvedAt', 'lineSentAt', 'pdfUrl'],
+    [SHEETS.po] : ['PONo', 'ShopName', 'ShopAddress', 'TaxID', 'IssueDate', 'QuoteDate', 'RefRepairNo', 'QuoteNo', 'Plate', 'VatType', 'Status', 'CreatedBy', 'CreatedAt', 'createdBySignatureUrl', 'approvedBy', 'approvedAt', 'lineSentAt', 'pdfUrl', 'printedAt'],
     [SHEETS.poItems]  : ['PONo', 'PartName', 'Qty', 'Unit', 'PricePerUnit', 'Discount', 'Amount', 'Note'],
     [SHEETS.stock]    : ['ID', 'PartCode', 'PartName', 'Unit', 'Qty', 'MinQty', 'Location', 'Note'],
     [SHEETS.stockLog] : ['Timestamp', 'Type', 'PartName', 'Qty', 'Ref'],
@@ -1617,4 +1618,31 @@ function initializeSheets() {
   }
 
   return { success: true, message: 'สร้างชีทเรียบร้อยแล้ว' };
+}
+
+// บันทึกสถานะการพิมพ์ใบ PO
+function markPOAsPrinted(poNo) {
+  try {
+    const sheet = getSheet('po');
+    const data  = sheet.getDataRange().getValues();
+    const headers = data[0];
+    let printedAtIdx = headers.indexOf('printedAt');
+    
+    // หากยังไม่มีคอลัมน์ printedAt ให้สร้างเพิ่มแบบไดนามิก
+    if (printedAtIdx < 0) {
+      printedAtIdx = headers.length;
+      sheet.getRange(1, printedAtIdx + 1).setValue('printedAt');
+    }
+    
+    const poNoColIdx = 0; // PONo อยู่คอลัมน์แรก (Index 0)
+    const rowIdx = data.findIndex((r, i) => i > 0 && String(r[poNoColIdx]).trim() === String(poNo).trim());
+    
+    if (rowIdx > 0) {
+      sheet.getRange(rowIdx + 1, printedAtIdx + 1).setValue(new Date().toISOString());
+      return { success: true };
+    }
+    return { success: false, message: 'ไม่พบ PO' };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 }

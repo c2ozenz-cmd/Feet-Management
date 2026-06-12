@@ -957,17 +957,36 @@ function renderPOTable(pos) {
   const tbody = document.getElementById('poTableBody');
   tbody.closest('table').classList.add('table-card-mobile');
   if (!pos.length) {
-    tbody.innerHTML = `<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
     return;
   }
-  tbody.innerHTML = pos.map(p => `
+  tbody.innerHTML = pos.map(p => {
+    const map = {
+      'รออนุมัติ'     : 'status-waiting-parts',
+      'อนุมัติแล้ว'   : 'status-approved',
+      'รับของแล้ว'    : 'status-done',
+    };
+    const cls = map[p.status] || 'status-waiting-parts';
+    return `
     <tr>
       <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span></td>
       <td data-label="ร้านค้า">${p.shopName}</td>
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
       <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
-      <td data-label="สถานะ">${statusBadge(p.status)}</td>
+      <td data-label="สถานะ">
+        <select class="badge-status ${cls}" onchange="changePOStatusDirect('${p.poNo}', this.value)" style="border:none; font-family:inherit; font-size:11px; font-weight:600; cursor:pointer; padding: 4px 24px 4px 12px; border-radius: 50px; outline:none; -webkit-appearance:none; -moz-appearance:none; appearance:none; background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><polyline points=%226 9 12 15 18 9%22></polyline></svg>'); background-repeat:no-repeat; background-position:right 8px center; background-size:10px;">
+          <option value="รออนุมัติ" ${p.status === 'รออนุมัติ' ? 'selected' : ''}>⏳ รออนุมัติ</option>
+          <option value="อนุมัติแล้ว" ${p.status === 'อนุมัติแล้ว' ? 'selected' : ''}>✅ อนุมัติแล้ว</option>
+          <option value="รับของแล้ว" ${p.status === 'รับของแล้ว' ? 'selected' : ''}>📦 รับของแล้ว</option>
+        </select>
+      </td>
+      <td data-label="การพิมพ์">
+        ${p.printedAt 
+          ? `<span class="badge bg-success-light text-success"><i class="bi bi-printer-fill me-1"></i> พิมพ์แล้ว</span>`
+          : `<span class="badge bg-secondary-light text-secondary"><i class="bi bi-printer me-1"></i> ยังไม่ได้พิมพ์</span>`
+        }
+      </td>
       <td data-label="">
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
@@ -975,7 +994,8 @@ function renderPOTable(pos) {
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function filterPOs() {
@@ -1323,6 +1343,106 @@ function deletePO(poNo) {
   });
 }
 
+function changePOStatusDirect(poNo, status) {
+  const p = allPOs.find(x => x.poNo === poNo);
+  if (!p) return;
+  if (p.status === status) return;
+
+  if (status === 'รับของแล้ว') {
+    Swal.fire({
+      title: 'ยืนยันรับของ',
+      html: `
+        <div class="text-start px-2">
+          <p class="mb-3" style="font-size:14px">
+            PO <b>${poNo}</b> มีรายการอะไหล่หรือค่าแรง?
+          </p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="syncStockCheckDirect" checked>
+            <label class="form-check-label fw-semibold" for="syncStockCheckDirect">
+              เพิ่มรายการเข้า Stock และรายการซ่อม
+            </label>
+          </div>
+          <div class="text-muted small ps-4">
+            <i class="bi bi-info-circle me-1"></i>
+            ยกเลิกติ๊กถ้าเป็น PO ค่าแรงเท่านั้น
+          </div>
+        </div>`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'ยืนยันรับของ',
+      cancelButtonText: 'ยกเลิก',
+      preConfirm: () => { return { syncStock: document.getElementById('syncStockCheckDirect').checked }; }
+    }).then(result => {
+      if (!result.isConfirmed) {
+        renderPOTable(allPOs);
+        return;
+      }
+      _doChangePOStatusDirect(poNo, status, result.value.syncStock);
+    });
+  } else {
+    confirmAction(`เปลี่ยนสถานะ PO ${poNo} เป็น "${status}"?`, () => {
+      _doChangePOStatusDirect(poNo, status, true);
+    }, () => {
+      renderPOTable(allPOs);
+    });
+  }
+}
+
+function _doChangePOStatusDirect(poNo, status, syncStock) {
+  showLoading('กำลังอัปเดต...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (!res.success) {
+        showToast('error', res.message);
+        renderPOTable(allPOs);
+        return;
+      }
+
+      showToast('success', 'อัปเดตสถานะเรียบร้อย');
+      const p = allPOs.find(x => x.poNo === poNo);
+      if (p) p.status = status;
+      renderPOTable(allPOs);
+
+      if (status === 'อนุมัติแล้ว') {
+        showLoading('กำลังสร้าง PDF พร้อมลายเซ็น...');
+        google.script.run
+          .withSuccessHandler(pdfRes => {
+            Swal.close();
+            showToast(
+              pdfRes.success ? 'success' : 'warning',
+              pdfRes.success ? 'บันทึก PDF พร้อมลายเซ็นแล้ว' : 'อัปเดตสถานะแล้ว แต่ PDF ไม่สำเร็จ'
+            );
+          })
+          .withFailureHandler(() => Swal.close())
+          .generateAndSavePOPdf(poNo);
+      }
+
+      if (status === 'รับของแล้ว') {
+        const refRepairNo = p ? p.refRepairNo : '';
+        if (syncStock && refRepairNo) {
+          Swal.fire({
+            icon: 'success',
+            title: 'รับของเรียบร้อย',
+            html: `อะไหล่จาก PO <b>${poNo}</b><br>
+                   ถูกเพิ่มเข้า Stock และรายการซ่อม <b>${refRepairNo}</b> แล้ว`,
+            confirmButtonText: 'ดูรายการซ่อม',
+            showCancelButton: true,
+            cancelButtonText: 'ปิด'
+          }).then(r => { if (r.isConfirmed) editRepair(refRepairNo); });
+        } else if (!syncStock) {
+          showToast('info', 'รับของแล้ว (ไม่บันทึกลง Stock เนื่องจากเป็นค่าแรง)');
+        }
+      }
+    })
+    .withFailureHandler(e => {
+      Swal.close();
+      showToast('error', e.message);
+      renderPOTable(allPOs);
+    })
+    .updatePOStatus(poNo, status, currentUser.name, syncStock);
+}
+
 function previewPO() {
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
   const poNo = document.getElementById('editPONo').value;
@@ -1353,6 +1473,7 @@ function previewPO() {
 
 
 function previewPOFromNo(poNo) {
+  document.getElementById('editPONo').value = poNo;
   const po = allPOs.find(p => p.poNo === poNo);
   if (!po) return;
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
@@ -1418,7 +1539,7 @@ function renderPrintPreview(po, items, settingsArr, sigUrl) {
           </div>
         </div>
         <div style="text-align:right;min-width:180px;flex-shrink:0">
-          <div style="background:#1a3a5c;color:#fff;padding:6px 14px;text-align:center;margin-bottom:8px">
+          <div class="po-dark-bg" style="background:#1a3a5c;color:#fff;padding:6px 14px;text-align:center;margin-bottom:8px">
             <div style="font-size:15px;font-weight:700;letter-spacing:2px">ใบสั่งซื้อ</div>
             <div style="font-size:10px;letter-spacing:3px;opacity:0.85">PURCHASE ORDER</div>
           </div>
@@ -1467,19 +1588,19 @@ function renderPrintPreview(po, items, settingsArr, sigUrl) {
   // ── Table Header ──
   function renderTableHeader() {
     return `
-    <div style="background:#f0f4f8;border-bottom:1px solid #ccc;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-align:center;letter-spacing:0.5px">
+    <div class="po-light-bg" style="background:#f0f4f8;border-bottom:1px solid #ccc;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-align:center;letter-spacing:0.5px">
       กรุณาจำหน่ายสินค้าตามรายการดังต่อไปนี้
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:11px">
       <thead>
-        <tr style="background:#1a3a5c;color:#fff">
-          <th style="padding:6px 8px;width:32px;text-align:center;font-weight:600">ลำดับ</th>
-          <th style="padding:6px 8px;text-align:left;font-weight:600">รายละเอียด / สินค้า</th>
-          <th style="padding:6px 8px;width:50px;text-align:center;font-weight:600">จำนวน</th>
-          <th style="padding:6px 8px;width:45px;text-align:center;font-weight:600">หน่วย</th>
-          <th style="padding:6px 8px;width:75px;text-align:center;font-weight:600">ราคา/หน่วย</th>
-          <th style="padding:6px 8px;width:60px;text-align:center;font-weight:600">ส่วนลด</th>
-          <th style="padding:6px 8px;width:80px;text-align:center;font-weight:600">จำนวนเงิน</th>
+        <tr class="po-thead-row" style="background:#1a3a5c;color:#fff">
+          <th class="po-th" style="padding:6px 8px;width:32px;text-align:center;font-weight:600">ลำดับ</th>
+          <th class="po-th" style="padding:6px 8px;text-align:left;font-weight:600">รายละเอียด / สินค้า</th>
+          <th class="po-th" style="padding:6px 8px;width:50px;text-align:center;font-weight:600">จำนวน</th>
+          <th class="po-th" style="padding:6px 8px;width:45px;text-align:center;font-weight:600">หน่วย</th>
+          <th class="po-th" style="padding:6px 8px;width:75px;text-align:center;font-weight:600">ราคา/หน่วย</th>
+          <th class="po-th" style="padding:6px 8px;width:60px;text-align:center;font-weight:600">ส่วนลด</th>
+          <th class="po-th" style="padding:6px 8px;width:80px;text-align:center;font-weight:600">จำนวนเงิน</th>
         </tr>
       </thead>`;
   }
@@ -1578,13 +1699,13 @@ function renderPrintPreview(po, items, settingsArr, sigUrl) {
                     margin-bottom:6px;flex-wrap:wrap">
           <span style="font-weight:700;color:#1a3a5c">หมายเหตุ :</span>
           ${po.plate
-            ? `<span style="background:#ffd600;color:#5a3e00;
+            ? `<span class="po-yellow-bg" style="background:#ffd600;color:#5a3e00;
                             padding:1px 10px;font-weight:700">
                 ${po.plate}
               </span>`
             : ''}
           ${po.refRepairNo
-            ? `<span style="background:#1a3a5c;color:#fff;padding:1px 10px">
+            ? `<span class="po-dark-bg" style="background:#1a3a5c;color:#fff;padding:1px 10px">
                 Job: ${po.refRepairNo}
               </span>`
             : ''}
@@ -1615,7 +1736,7 @@ function renderPrintPreview(po, items, settingsArr, sigUrl) {
               ${vatType !== 'none' ? fmtNum(vat) : '0.00'}
             </td>
           </tr>
-          <tr style="background:#1a3a5c">
+          <tr class="po-dark-bg" style="background:#1a3a5c">
             <td style="padding:7px 12px;color:#fff;font-weight:700">จำนวนเงินทั้งสิ้น</td>
             <td style="padding:7px 12px;text-align:right;color:#fff;font-weight:700">
               ${fmtNum(grand)}
@@ -1683,36 +1804,55 @@ function printPO() {
           <title>ใบสั่งซื้ออะไหล่</title>
           <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
           <style>
-            body{font-family:'Sarabun',sans-serif;margin:0;padding:16px}
-            @media print{
-              body{padding:0}
-              @page{size:A4;margin:12mm}
-            }
             * {
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
               color-adjust: exact !important;
             }
-            /* บังคับสีตัวอักษรทุก element */
-            [style*="color:#555"],[style*="color: #555"]{ color:#555 !important }
-            [style*="color:#888"],[style*="color: #888"]{ color:#888 !important }
-            [style*="color:#aaa"],[style*="color: #aaa"]{ color:#aaa !important }
-            [style*="color:#fff"],[style*="color: #fff"]{ color:#fff !important }
-            [style*="color:#1a3a5c"]{ color:#1a3a5c !important }
-            [style*="color:#5a3e00"]{ color:#5a3e00 !important }
-            [style*="color:#c05050"]{ color:#c05050 !important }
-            [style*="color:#444"]{ color:#444 !important }
-            /* บังคับ background */
-            [style*="background:#1a3a5c"]{ background:#1a3a5c !important }
-            [style*="background:#ffd600"]{ background:#ffd600 !important }
-            [style*="background:#f0f4f8"]{ background:#f0f4f8 !important }
-            [style*="background:#f9fafb"]{ background:#f9fafb !important }
+            body { font-family:'Sarabun',sans-serif; margin:0; padding:16px; }
+            @media print {
+              body { padding:0; }
+              @page { size:A4; margin:12mm; }
+            }
+            .po-dark-bg,
+            .po-dark-bg td,
+            .po-thead-row,
+            .po-thead-row th,
+            .po-th,
+            th {
+              background-color: #1a3a5c !important;
+              background: #1a3a5c !important;
+              color: #ffffff !important;
+            }
+            .po-light-bg {
+              background-color: #f0f4f8 !important;
+              background: #f0f4f8 !important;
+              color: #1a3a5c !important;
+            }
+            .po-yellow-bg {
+              background-color: #ffd600 !important;
+              background: #ffd600 !important;
+              color: #5a3e00 !important;
+            }
+            /* ตารางแถวสลับสี */
+            tbody tr:nth-child(even) td {
+              background-color: #f9fafb !important;
+            }
           </style>
         </head><body>
         <div style="max-width:780px;margin:0 auto">${el.outerHTML}</div>
         <script>window.onload=()=>window.print();<\/script>
       </body></html>`);
       win.document.close();
+
+      const poNo = document.getElementById('editPONo').value;
+      if (poNo && poNo !== 'PREVIEW') {
+        google.script.run
+          .withSuccessHandler(() => {
+            loadPOs();
+          })
+          .markPOAsPrinted(poNo);
+      }
 
       // ปิด loading หลังเปิดหน้าต่างสำเร็จ
       Swal.fire({
