@@ -72,6 +72,41 @@ function doPost(e) {
           return;
         }
 
+        // ── ขออนุมัติผ่านคำสั่งในกลุ่ม (Free Reply Flex Message) ──
+        const poMatch = cleanText.match(/ขออนุมัติ\s*(?:PO\s*)?(PO\d+)/i);
+        const repMatch = cleanText.match(/ขออนุมัติ\s*(?:ซ่อม\s*)?(REP\d+)/i);
+
+        if (poMatch) {
+          const poNo = poMatch[1].toUpperCase();
+          const po = getPOs().find(p => p.poNo === poNo);
+          if (po) {
+            if (!['รออนุมัติ', 'ออกPO'].includes(po.status)) {
+              replyLineMessage(event.replyToken, `ℹ️ ใบสั่งซื้อ ${poNo} ได้รับการอนุมัติหรือดำเนินการไปแล้ว\nสถานะปัจจุบัน: "${po.status}"`);
+            } else {
+              const items = getPOItems(poNo);
+              replyLineFlex(event.replyToken, buildPOFlexMessage(po, items));
+            }
+          } else {
+            replyLineMessage(event.replyToken, `❌ ไม่พบข้อมูลใบสั่งซื้อ ${poNo} ในระบบ`);
+          }
+          return;
+        }
+
+        if (repMatch) {
+          const repairNo = repMatch[1].toUpperCase();
+          const repair = getRepairs().find(r => r.repairNo === repairNo);
+          if (repair) {
+            if (repair.status !== 'รอดำเนินการ') {
+              replyLineMessage(event.replyToken, `ℹ️ รายการแจ้งซ่อม ${repairNo} ได้รับการอนุมัติหรือดำเนินการไปแล้ว\nสถานะปัจจุบัน: "${repair.status}"`);
+            } else {
+              replyLineFlex(event.replyToken, buildRepairFlexMessage(repair));
+            }
+          } else {
+            replyLineMessage(event.replyToken, `❌ ไม่พบข้อมูลใบแจ้งซ่อม ${repairNo} ในระบบ`);
+          }
+          return;
+        }
+
         // ── ลงทะเบียน Line ID ──
         // registerLineUserId(lineUserId, text);
         // replyLineMessage(event.replyToken,
@@ -179,12 +214,7 @@ function handlePostback(event) {
         saveApprovalInfo('repair', id, lineUserId);
         // ── ส่ง Flex ผลอนุมัติไปกลุ่ม (พร้อมปุ่มช่าง) ──
         const plate   = repair?.plate || '';
-        const token   = getLineToken();
-        const groupId = getLineGroupId('service');
-        callLineAPI('https://api.line.me/v2/bot/message/push', {
-          to      : groupId,
-          messages: [buildApprovalResultFlex('repair', id, approverName, dateStr, plate)]
-        }, token);
+        replyLineFlex(replyToken, buildApprovalResultFlex('repair', id, approverName, dateStr, plate));
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
       }
@@ -213,12 +243,7 @@ function handlePostback(event) {
         const pdfRes = generateAndSavePOPdf(id);
         const pdfUrl = (pdfRes && pdfRes.success) ? pdfRes.pdfUrl : '';
         const plate   = po?.plate || ''; 
-        const token   = getLineToken();
-        const groupId = getLineGroupId('po');
-        callLineAPI('https://api.line.me/v2/bot/message/push', {
-          to      : groupId,
-          messages: [buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl)]
-        }, token);
+        replyLineFlex(replyToken, buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl));
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
       }
@@ -769,6 +794,15 @@ function replyLineMessage(replyToken, text) {
   }, token);
 }
 
+function replyLineFlex(replyToken, flexObj) {
+  const token = getLineToken();
+  if (!token) return;
+  callLineAPI('https://api.line.me/v2/bot/message/reply', {
+    replyToken,
+    messages: [flexObj]
+  }, token);
+}
+
 function pushLineMessage(to, text) {
   const token = getLineToken();
   if (!token) return;
@@ -776,6 +810,65 @@ function pushLineMessage(to, text) {
     to,
     messages: [{ type: 'text', text }]
   }, token);
+}
+
+function logLineMessage(url, payload, responseCode) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('LineLog');
+    
+    if (!sheet) {
+      sheet = ss.insertSheet('LineLog');
+      sheet.appendRow([
+        'วันเวลา (Timestamp)', 
+        'ประเภทคำสั่ง (API Method)', 
+        'ประเภทข้อความ (Message Type)', 
+        'ผู้รับ (Recipient ID)', 
+        'รายละเอียด/ข้อความพรีวิว (Content Preview)', 
+        'สถานะค่าบริการ (Cost Status)', 
+        'HTTP Code'
+      ]);
+      sheet.getRange(1, 1, 1, 7).setFontWeight('bold').setBackground('#E2E8F0');
+    }
+
+    const timestamp = new Date();
+    
+    // ตรวจสอบเงื่อนไข Push (คิดเงิน) หรือ Reply (ฟรี) จาก URL
+    const isPush = url.indexOf('/push') > -1;
+    const methodType = isPush ? 'Push (บอททักก่อน)' : 'Reply (ตอบกลับแชท)';
+    const costStatus = isPush ? 'คิดเงิน (Push)' : 'ฟรี (Reply)';
+    
+    let recipient = '';
+    if (isPush) {
+      recipient = payload.to || '';
+    } else {
+      recipient = 'Reply Token: ' + (payload.replyToken ? payload.replyToken.substring(0, 10) + '...' : '');
+    }
+    
+    let msgType = 'unknown';
+    let preview = '—';
+    if (payload.messages && payload.messages.length > 0) {
+      const firstMsg = payload.messages[0];
+      msgType = firstMsg.type || 'unknown';
+      if (msgType === 'text') {
+        preview = firstMsg.text || '';
+      } else if (msgType === 'flex') {
+        preview = firstMsg.altText || 'Flex Message';
+      }
+    }
+    
+    sheet.appendRow([
+      timestamp,
+      methodType,
+      msgType,
+      recipient,
+      preview,
+      costStatus,
+      responseCode
+    ]);
+  } catch (e) {
+    Logger.log('logLineMessage error: ' + e.message);
+  }
 }
 
 function callLineAPI(url, payload, token) {
@@ -788,8 +881,14 @@ function callLineAPI(url, payload, token) {
       muteHttpExceptions: true
     });
     const code = res.getResponseCode();
+    
+    // บันทึก Log การส่งข้อความ LINE
+    logLineMessage(url, payload, code);
+    
     return { success: code === 200, code, body: res.getContentText() };
   } catch (e) {
+    // บันทึก Log กรณีเกิด Error
+    logLineMessage(url, payload, 'ERROR: ' + e.message);
     return { success: false, message: e.message };
   }
 }

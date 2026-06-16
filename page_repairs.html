@@ -12,6 +12,7 @@
 
   <div class="search-bar">
     <input type="text" id="repairSearch" class="form-control" placeholder="ค้นหาเลขที่ / ทะเบียน..." oninput="filterRepairs()">
+    <input type="month" id="repairMonthFilter" class="form-control" style="max-width:180px" onchange="filterRepairs()">
     <select id="repairStatusFilter" class="form-select" style="max-width:180px" onchange="filterRepairs()">
       <option value="">ทุกสถานะ</option>
       <option value="รอดำเนินการ">รอดำเนินการ</option>
@@ -155,8 +156,8 @@
     <div class="card-header">
       <div class="card-icon"><i class="bi bi-gear"></i></div>
       รายการอะไหล่ที่ใช้
-      <button class="btn btn-sm btn-outline-primary ms-auto" onclick="openPartPicker()">
-        <i class="bi bi-plus-lg me-1"></i>เพิ่มอะไหล่
+      <button class="btn btn-sm btn-outline-primary ms-auto" onclick="openPartPicker()" id="openPartPickerBtn">
+        <i class="bi bi-plus-lg me-1"></i>เลือกอะไหล่จากคลัง
       </button>
     </div>
     <div class="card-body p-0">
@@ -202,7 +203,7 @@
 
   <div class="d-flex gap-2 justify-content-end">
     <button class="btn btn-outline-secondary" onclick="showRepairList()"><i class="bi bi-x-lg me-1"></i>ยกเลิก</button>
-    <button class="btn btn-primary" onclick="saveRepair()"><i class="bi bi-save me-1"></i>บันทึก</button>
+    <button class="btn btn-primary" onclick="saveRepair()" id="saveRepairBtn"><i class="bi bi-save me-1"></i>บันทึก</button>
   </div>
 </div>
 

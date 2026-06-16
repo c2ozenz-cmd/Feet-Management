@@ -137,6 +137,7 @@ function navigateTo(page) {
     case 'settings': loadSettings(); break;
     case 'summary' : loadSummary(); break;
     case 'oiltemplate': loadOilTemplate(); break;
+    case 'linelog': loadLineLog(); break;
   }
 }
 
@@ -631,7 +632,7 @@ function loadRepairs() {
   showRepairList();
   google.script.run.withSuccessHandler(r => {
     allRepairs = r || [];
-    renderRepairTable(allRepairs);
+    filterRepairs();
   }).getRepairs();
   loadBusPlates();
 }
@@ -657,6 +658,7 @@ function renderRepairTable(repairs) {
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editRepair('${r.repairNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           ${r.status === 'รออะไหล่' ? `<button class="btn btn-sm btn-info" onclick="createPOFromRepairNo('${r.repairNo}','${r.plate}')" title="สร้าง PO"><i class="bi bi-file-earmark-plus"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="promptSendToLine('repair', '${r.repairNo}')" title="ส่ง/แชร์เข้า Line"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deleteRepair('${r.repairNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
@@ -667,9 +669,11 @@ function renderRepairTable(repairs) {
 function filterRepairs() {
   const q = document.getElementById('repairSearch').value.toLowerCase();
   const s = document.getElementById('repairStatusFilter').value;
+  const m = document.getElementById('repairMonthFilter').value;
   renderRepairTable(allRepairs.filter(r =>
     (!q || r.repairNo.toLowerCase().includes(q) || r.plate.toLowerCase().includes(q)) &&
-    (!s || r.status === s)
+    (!s || r.status === s) &&
+    (!m || r.date.startsWith(m))
   ));
 }
 
@@ -682,6 +686,21 @@ function showRepairForm(repair = null) {
   document.getElementById('repairListView').classList.add('d-none');
   document.getElementById('repairFormView').classList.remove('d-none');
   repairPartRows = [];
+
+  const isCompleted = repair && repair.status === 'เสร็จแล้ว';
+  
+  // ล็อกฟิลด์ป้อนข้อมูลหากใบแจ้งซ่อมเสร็จสิ้นแล้ว
+  const fields = ['repairDate', 'repairPlate', 'repairChassis', 'repairMileage', 'repairOilProgram', 'repairList', 'repairSummary'];
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = isCompleted;
+  });
+
+  // ซ่อน/แสดงปุ่มบันทึกและปุ่มเลือกอะไหล่
+  const saveBtn = document.getElementById('saveRepairBtn');
+  if (saveBtn) saveBtn.style.display = isCompleted ? 'none' : '';
+  const addPartBtn = document.getElementById('openPartPickerBtn');
+  if (addPartBtn) addPartBtn.style.display = isCompleted ? 'none' : '';
 
   if (repair) {
     document.getElementById('repairFormTitle').textContent = 'แก้ไขการแจ้งซ่อม';
@@ -757,21 +776,30 @@ function removeRepairPart(idx) {
 function renderRepairParts() {
   const tbody = document.getElementById('repairPartsBody');
   if (!repairPartRows.length) {
-    tbody.innerHTML = '<tr id="repairPartsEmpty"><td colspan="4" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td></tr>';
+    tbody.innerHTML = '<tr id="repairPartsEmpty"><td colspan="5" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td></tr>';
     return;
   }
+
+  // ตรวจสอบว่าจ็อบซ่อมเสร็จสิ้นแล้วหรือไม่
+  const repairNo = document.getElementById('editRepairNo').value;
+  const isCompleted = repairNo && (allRepairs.find(x => x.repairNo === repairNo)?.status === 'เสร็จแล้ว');
+
   tbody.innerHTML = repairPartRows.map((p, i) => `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td>
         <div class="input-group input-group-sm">
-          <input type="text" class="form-control" value="${p.partName || ''}" onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
-          <button class="btn btn-outline-secondary" onclick="openPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
+          <input type="text" class="form-control" value="${p.partName || ''}" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
+          <button class="btn btn-outline-secondary" ${isCompleted ? 'disabled' : ''} onclick="openPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
         </div>
       </td>
       <td><span class="text-muted small">${p.partCode || ''}</span></td>
-      <td><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
-      <td><button class="btn btn-sm btn-outline-danger" onclick="removeRepairPart(${i})"><i class="bi bi-trash"></i></button></td>
+      <td><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
+      <td>
+        ${isCompleted ? '—' : `
+        <button class="btn btn-sm btn-outline-danger" onclick="removeRepairPart(${i})"><i class="bi bi-trash"></i></button>
+        `}
+      </td>
     </tr>`).join('');
 }
 
@@ -806,9 +834,14 @@ function saveRepair() {
           icon : 'success',
           title: 'บันทึกเรียบร้อย',
           text : 'ต้องการส่งขออนุมัติเข้า Line กลุ่มหรือไม่?',
-          showCancelButton : true,
-          confirmButtonText: '📲 ส่ง Line',
-          cancelButtonText : 'ไม่ส่ง'
+          showDenyButton: true,
+          showCancelButton: true,
+          confirmButtonText: '📲 ส่ง Line (อัตโนมัติ)',
+          denyButtonText: '🔗 แชร์เข้า Line',
+          cancelButtonText: 'ไม่ส่ง',
+          confirmButtonColor: '#3B82F6',
+          denyButtonColor: '#06C755',
+          cancelButtonColor: '#6B7280'
         }).then(r => {
           if (r.isConfirmed) {
             showLoading('กำลังส่ง Line...');
@@ -827,6 +860,8 @@ function saveRepair() {
                 showToast('error', err.message);
               })
               .sendRepairToLine(res.repairNo);
+          } else if (r.isDenied) {
+            shareRepairToLine(res.repairNo);
           }
         });
       } else {
@@ -948,9 +983,37 @@ function loadPOs() {
   }).getShops();
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
-    renderPOTable(allPOs);
+    filterPOs();
   }).getPOs();
   loadBusPlates();
+}
+
+function updateSelectStatusClass(sel) {
+  const map = {
+    'รออนุมัติ'   : 'status-waiting-parts',
+    'อนุมัติแล้ว' : 'status-approved',
+    'รับของแล้ว'  : 'status-done'
+  };
+  sel.className = 'badge-status ' + (map[sel.value] || 'status-waiting-parts');
+}
+
+function poStatusSelectHtml(poNo, currentStatus) {
+  const opts = [
+    { val: 'รออนุมัติ',   label: '⏳ รออนุมัติ',   cls: 'status-waiting-parts' },
+    { val: 'อนุมัติแล้ว', label: '✅ อนุมัติแล้ว', cls: 'status-approved'      },
+    { val: 'รับของแล้ว',  label: '📦 รับของแล้ว',  cls: 'status-done'          },
+  ];
+  const cur = opts.find(o => o.val === currentStatus) || opts[0];
+  const options = opts.map(o =>
+    `<option value="${o.val}" data-cls="${o.cls}" ${o.val === currentStatus ? 'selected' : ''}>${o.label}</option>`
+  ).join('');
+  return `<select class="badge-status ${cur.cls}"
+    onchange="changePOStatusDirect('${poNo}', this.value); this.className='badge-status '+this.options[this.selectedIndex].dataset.cls"
+    style="border:none;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;
+           padding:4px 24px 4px 12px;border-radius:50px;outline:none;
+           -webkit-appearance:none;-moz-appearance:none;appearance:none;
+           background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><polyline points=%226 9 12 15 18 9%22></polyline></svg>');
+           background-repeat:no-repeat;background-position:right 8px center;background-size:10px">${options}</select>`;
 }
 
 function renderPOTable(pos) {
@@ -960,29 +1023,18 @@ function renderPOTable(pos) {
     tbody.innerHTML = `<tr><td colspan="8" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
     return;
   }
-  tbody.innerHTML = pos.map(p => {
-    const map = {
-      'รออนุมัติ'     : 'status-waiting-parts',
-      'อนุมัติแล้ว'   : 'status-approved',
-      'รับของแล้ว'    : 'status-done',
-    };
-    const cls = map[p.status] || 'status-waiting-parts';
-    return `
+  
+  pos = [...pos].sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
+  tbody.innerHTML = pos.map(p => `
     <tr>
       <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span></td>
       <td data-label="ร้านค้า">${p.shopName}</td>
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
       <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
-      <td data-label="สถานะ">
-        <select class="badge-status ${cls}" onchange="changePOStatusDirect('${p.poNo}', this.value)" style="border:none; font-family:inherit; font-size:11px; font-weight:600; cursor:pointer; padding: 4px 24px 4px 12px; border-radius: 50px; outline:none; -webkit-appearance:none; -moz-appearance:none; appearance:none; background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22currentColor%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><polyline points=%226 9 12 15 18 9%22></polyline></svg>'); background-repeat:no-repeat; background-position:right 8px center; background-size:10px;">
-          <option value="รออนุมัติ" ${p.status === 'รออนุมัติ' ? 'selected' : ''}>⏳ รออนุมัติ</option>
-          <option value="อนุมัติแล้ว" ${p.status === 'อนุมัติแล้ว' ? 'selected' : ''}>✅ อนุมัติแล้ว</option>
-          <option value="รับของแล้ว" ${p.status === 'รับของแล้ว' ? 'selected' : ''}>📦 รับของแล้ว</option>
-        </select>
-      </td>
+      <td data-label="สถานะ">${poStatusSelectHtml(p.poNo, p.status)}</td>
       <td data-label="การพิมพ์">
-        ${p.printedAt 
+        ${p.printedAt
           ? `<span class="badge bg-success-light text-success"><i class="bi bi-printer-fill me-1"></i> พิมพ์แล้ว</span>`
           : `<span class="badge bg-secondary-light text-secondary"><i class="bi bi-printer me-1"></i> ยังไม่ได้พิมพ์</span>`
         }
@@ -991,19 +1043,21 @@ function renderPOTable(pos) {
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="promptSendToLine('po', '${p.poNo}')" title="ส่ง/แชร์เข้า Line"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
-    </tr>`;
-  }).join('');
+    </tr>`).join('');
 }
 
 function filterPOs() {
   const q = document.getElementById('poSearch').value.toLowerCase();
   const s = document.getElementById('poStatusFilter').value;
+  const m = document.getElementById('poMonthFilter').value;
   renderPOTable(allPOs.filter(p =>
     (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q)) &&
-    (!s || p.status === s)
+    (!s || p.status === s) &&
+    (!m || p.issueDate.startsWith(m))
   ));
 }
 
@@ -1203,9 +1257,14 @@ function savePO() {
                 icon: 'success',
                 title: 'บันทึกเรียบร้อย',
                 text: 'ต้องการส่งขออนุมัติเข้า Line กลุ่มหรือไม่?',
+                showDenyButton: true,
                 showCancelButton: true,
-                confirmButtonText: '📲 ส่ง Line',
-                cancelButtonText: 'ไม่ส่ง'
+                confirmButtonText: '📲 ส่ง Line (อัตโนมัติ)',
+                denyButtonText: '🔗 แชร์เข้า Line',
+                cancelButtonText: 'ไม่ส่ง',
+                confirmButtonColor: '#3B82F6',
+                denyButtonColor: '#06C755',
+                cancelButtonColor: '#6B7280'
               }).then(r => {
                 if (r.isConfirmed) {
                   showLoading('กำลังส่ง Line...');
@@ -1224,6 +1283,8 @@ function savePO() {
                       showToast('error', err.message);
                     })
                     .sendPOToLine(res.poNo);
+                } else if (r.isDenied) {
+                  sharePOToLine(res.poNo);
                 }
               });
             })
@@ -1947,14 +2008,6 @@ function filterStock() {
   }));
 }
 
-function loadStockLog() {
-  // Minimal log from stock movement - show from StockLog sheet
-  document.getElementById('stockLogBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2 small">กำลังโหลด...</td></tr>';
-  // Use a basic approach since we don't have a direct getStockLog function
-  // You can extend this as needed
-  document.getElementById('stockLogBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2 small">ดูข้อมูลใน Google Sheet ชีท StockLog</td></tr>';
-}
-
 function showStockModal(id = null) {
   document.getElementById('stockItemId').value = '';
   document.getElementById('stockPartCode').value = '';
@@ -2091,7 +2144,8 @@ function confirmDeductPicker() {
         partName: s.partName,
         currentQty: parseFloat(s.qty) || 0,
         unit    : s.unit || 'ชิ้น',
-        qty     : 1
+        qty     : 1,
+        pricePerUnit: s.lastPrice || 0
       });
     }
   });
@@ -2124,9 +2178,15 @@ function renderDeductItems() {
           value="${r.qty}" min="0.01" step="0.01"
           style="width:75px"
           onchange="deductRows[${i}].qty=parseFloat(this.value)||0;renderDeductItems()">
-        ${overQty
-          ? `<div class="text-danger" style="font-size:10px">เกินคงเหลือ</div>`
-          : ''}
+        ${overQty ? `<div class="text-danger" style="font-size:10px">เกินคงเหลือ</div>` : ''}
+      </td>
+      <td>
+        <!-- ✅ เพิ่มช่องราคา -->
+        <input type="number" class="form-control form-control-sm text-end"
+          value="${r.pricePerUnit || 0}" min="0" step="0.01"
+          style="width:90px"
+          placeholder="ราคา/หน่วย"
+          onchange="deductRows[${i}].pricePerUnit=parseFloat(this.value)||0">
       </td>
       <td class="text-muted">${r.unit}</td>
       <td>
@@ -2194,15 +2254,37 @@ function confirmDeductStock() {
       })
       .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
       .manualDeductStock(
-        deductRows.map(r => ({ stockId: r.stockId, partName: r.partName, qty: r.qty })),
+        deductRows.map(r => ({ stockId: r.stockId, partName: r.partName, qty: r.qty, pricePerUnit: r.pricePerUnit })),
         date, plate, note
       );
   });
 }
 
+function cancelDeduct(logId, partName, qty) {
+  confirmAction(
+    `ยกเลิกการตัด "${partName}" จำนวน ${qty} รายการ?\nระบบจะบวกจำนวนคืนใน Stock`, 
+    () => {
+      showLoading('กำลังยกเลิก...');
+      google.script.run
+        .withSuccessHandler(res => {
+          Swal.close();
+          if (res.success) {
+            showToast('success', `คืน ${res.partName} ${res.qty} รายการเรียบร้อย`);
+            loadStock();      // refresh ตาราง stock
+            loadStockLog();   // refresh log
+          } else {
+            showToast('error', res.message);
+          }
+        })
+        .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+        .cancelDeductStock(logId);
+    }
+  );
+}
+
 function loadStockLog() {
   document.getElementById('stockLogBody').innerHTML =
-    '<tr><td colspan="5" class="text-center text-muted py-2 small">กำลังโหลด...</td></tr>';
+    '<tr><td colspan="6" class="text-center text-muted py-2 small">กำลังโหลด...</td></tr>';
 
   google.script.run
     .withSuccessHandler(logs => {
@@ -2210,37 +2292,47 @@ function loadStockLog() {
       tbody.closest('table').classList.add('table-card-mobile');
 
       if (!logs.length) {
-        tbody.innerHTML = '<tr><td colspan="5" data-label="" class="text-center text-muted py-3">ยังไม่มีประวัติ</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" data-label="" class="text-center text-muted py-3">ยังไม่มีประวัติ</td></tr>';
         return;
       }
 
       const typeLabel = {
-        'IN'         : { label: 'รับเข้า',      cls: 'status-done',          icon: 'box-arrow-in-down' },
-        'OUT'        : { label: 'ตัดออก(ซ่อม)', cls: 'status-inprogress',    icon: 'box-arrow-up' },
-        'OUT-MANUAL' : { label: 'ตัดออก(manual)', cls: 'status-waiting',     icon: 'scissors' },
-        'LINE_REG'   : { label: 'ลงทะเบียน Line', cls: 'status-approved',   icon: 'line' }
+        'IN'         : { label: 'รับเข้า',         cls: 'status-done',       icon: 'box-arrow-in-down' },
+        'OUT'        : { label: 'ตัดออก(ซ่อม)',    cls: 'status-inprogress', icon: 'box-arrow-up'      },
+        'OUT-MANUAL' : { label: 'ตัดออก(manual)',  cls: 'status-waiting',    icon: 'scissors'          },
+        'CANCEL'     : { label: 'ยกเลิก',          cls: 'status-approved',   icon: 'arrow-counterclockwise' },
+        'LINE_REG'   : { label: 'ลงทะเบียน Line', cls: 'status-approved',   icon: 'line'              }
       };
 
       tbody.innerHTML = logs.map(l => {
         const t = typeLabel[l.type] || { label: l.type, cls: 'status-waiting-parts', icon: 'question' };
+        
+        // ✅ แสดงปุ่มยกเลิกเฉพาะ OUT-MANUAL และมี logId
+        const cancelBtn = (l.type === 'OUT-MANUAL' && l.logId)
+          ? `<button class="btn btn-sm btn-outline-danger" 
+              onclick="cancelDeduct('${l.logId}','${l.partName}',${l.qty})"
+              title="ยกเลิกรายการนี้">
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>`
+          : '';
+
         return `<tr>
-          <td data-label="วันที่/เวลา" class="text-muted small">
-            ${formatDate(l.timestamp)}
-          </td>
+          <td data-label="วันที่/เวลา" class="text-muted small">${formatDate(l.timestamp)}</td>
           <td data-label="ประเภท">
             <span class="badge-status ${t.cls}">
               <i class="bi bi-${t.icon}"></i>${t.label}
             </span>
           </td>
           <td data-label="อะไหล่" class="fw-semibold">${l.partName}</td>
-          <td data-label="จำนวน" class="fw-bold">${l.qty}</td>
+          <td data-label="จำนวน" class="fw-bold text-end">${l.qty}</td>
           <td data-label="อ้างอิง" class="text-muted small">${l.ref}</td>
+          <td>${cancelBtn}</td>
         </tr>`;
       }).join('');
     })
     .withFailureHandler(e => {
       document.getElementById('stockLogBody').innerHTML =
-        `<tr><td colspan="5" class="text-center text-danger py-2 small">${e.message}</td></tr>`;
+        `<tr><td colspan="6" class="text-center text-danger py-2 small">${e.message}</td></tr>`;
     })
     .getStockLog(50);  // โหลด 50 รายการล่าสุด
 }
@@ -3573,10 +3665,23 @@ function promptSendToLine(type, id) {
     title            : 'ส่งแจ้งเข้า Line?',
     text             : `ต้องการส่งขออนุมัติ ${id} เข้า Line กลุ่มหรือไม่?`,
     icon             : 'question',
+    showDenyButton   : true,
     showCancelButton : true,
-    confirmButtonText: '📲 ส่ง Line',
-    cancelButtonText : 'ไม่ส่ง'
+    confirmButtonText: '📲 ส่ง Line (อัตโนมัติ)',
+    denyButtonText   : '🔗 แชร์เข้า Line',
+    cancelButtonText : 'ไม่ส่ง',
+    confirmButtonColor: '#3B82F6',
+    denyButtonColor  : '#06C755',
+    cancelButtonColor: '#6B7280'
   }).then(r => {
+    if (r.isDenied) {
+      if (type === 'repair') {
+        shareRepairToLine(id);
+      } else {
+        sharePOToLine(id);
+      }
+      return;
+    }
     if (!r.isConfirmed) return;
     showLoading('กำลังส่ง Line...');
     google.script.run
@@ -3597,11 +3702,23 @@ function promptSendToLine(type, id) {
                                   <span style="color:#d97706">${sentDate}</span><br><br>
                                   ต้องการส่งซ้ำอีกครั้งหรือไม่?
                                 </div>`,
+            showDenyButton   : true,
             showCancelButton : true,
             confirmButtonText: '📲 ส่งซ้ำ',
+            denyButtonText   : '🔗 แชร์เข้า Line',
             cancelButtonText : 'ยกเลิก',
-            confirmButtonColor: '#d97706'
+            confirmButtonColor: '#d97706',
+            denyButtonColor  : '#06C755',
+            cancelButtonColor: '#6B7280'
           }).then(r2 => {
+            if (r2.isDenied) {
+              if (type === 'repair') {
+                shareRepairToLine(id);
+              } else {
+                sharePOToLine(id);
+              }
+              return;
+            }
             if (!r2.isConfirmed) return;
             // force ส่งซ้ำ
             showLoading('กำลังส่ง Line...');
@@ -3629,6 +3746,220 @@ function promptSendToLine(type, id) {
       })
       .withFailureHandler(err => { Swal.close(); showToast('error', err.message); })
       [checkFn](id);
+  });
+}
+
+function executeShareToLine(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    Swal.fire({
+      icon: 'success',
+      title: 'คัดลอกข้อความสำเร็จ!',
+      html: `<div class="text-start fs-6" style="color: #4b5563">
+               ระบบได้ทำการคัดลอกเนื้อหาเรียบร้อยแล้ว<br>
+               ท่านสามารถเปิดโปรแกรม LINE แล้วกด <b>วาง (Ctrl+V)</b> เพื่อส่งในแชท/กลุ่มได้ทันทีครับ<br><br>
+               <span class="text-muted small">*สำหรับมือถือหรือหากต้องการเปิดหน้าเว็บแชร์ ให้กดปุ่มสีเขียวด้านล่าง</span>
+             </div>`,
+      showCancelButton: true,
+      confirmButtonText: '📲 เปิดหน้า LINE Share',
+      cancelButtonText: 'ปิดหน้าต่าง',
+      confirmButtonColor: '#06C755',
+      cancelButtonColor: '#6B7280'
+    }).then(r => {
+      if (r.isConfirmed) {
+        const shareUrl = `https://social-plugins.line.me/lineit/share?text=${encodeURIComponent(text)}`;
+        window.open(shareUrl, '_blank');
+      }
+    });
+  }).catch(err => {
+    // กรณีที่เบราว์เซอร์ไม่อนุญาตให้คัดลอกลงคลิปบอร์ด ให้ใช้การเด้งเข้าเว็บแชร์เป็น fallback
+    const shareUrl = `https://social-plugins.line.me/lineit/share?text=${encodeURIComponent(text)}`;
+    window.open(shareUrl, '_blank');
+  });
+}
+
+function shareRepairToLine(repairNo) {
+  const repair = allRepairs.find(r => r.repairNo === repairNo);
+  if (!repair) {
+    showToast('error', 'ไม่พบรายการซ่อม');
+    return;
+  }
+
+  const text = `🔧 แจ้งซ่อมใหม่: ${repair.repairNo}\n` +
+               `🚌 ทะเบียนรถ: ${repair.plate || '—'}\n` +
+               `📅 วันที่แจ้ง: ${formatDate(repair.date)}\n` +
+               `📊 เลขไมล์: ${repair.mileage ? Number(repair.mileage).toLocaleString() + ' กม.' : '—'}\n` +
+               `👤 ผู้แจ้ง: ${repair.createdBy || '—'}\n` +
+               `📋 รายการซ่อม: ${repair.repairList || '—'}`;
+
+  executeShareToLine(text);
+}
+
+function sharePOToLine(poNo) {
+  const po = allPOs.find(p => p.poNo === poNo);
+  if (!po) {
+    showToast('error', 'ไม่พบใบสั่งซื้อ');
+    return;
+  }
+
+  showLoading('กำลังโหลดรายการสินค้า...');
+  google.script.run
+    .withSuccessHandler(items => {
+      Swal.close();
+      
+      const subtotal = (items || []).reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+      let vat = 0;
+      let grand = subtotal;
+      const vatType = po.vatType || 'none';
+      if (vatType === 'exclusive') {
+        vat = subtotal * 0.07;
+        grand = subtotal + vat;
+      } else if (vatType === 'inclusive') {
+        vat = subtotal - subtotal / 1.07;
+        grand = subtotal;
+      }
+      
+      const totalStr = grand.toLocaleString('th-TH', { minimumFractionDigits: 2 }) + ' บาท';
+
+      let text = `📋 ขออนุมัติ PO: ${po.poNo}\n` +
+                 `🏪 ร้านค้า: ${po.shopName || '—'}\n` +
+                 `🚌 ทะเบียน: ${po.plate || '—'}\n` +
+                 `🔧 อ้างอิงซ่อม: ${po.refRepairNo || '—'}\n` +
+                 `📅 วันที่: ${formatDate(po.issueDate)}\n` +
+                 `👤 ผู้ขอ: ${po.createdBy || '—'}\n` +
+                 `📦 รายการสินค้า:\n`;
+
+      if (items && items.length > 0) {
+        items.forEach(i => {
+          text += `- ${i.partName || '—'} (${i.qty} ${i.unit || ''})\n`;
+        });
+      } else {
+        text += `- ไม่มีรายการสินค้า\n`;
+      }
+
+      text += `💰 ยอดรวมทั้งสิ้น: ${totalStr}`;
+      
+      if (po.pdfUrl) {
+        text += `\n📄 ดูใบสั่งซื้อ PDF: ${po.pdfUrl}`;
+      }
+
+      executeShareToLine(text);
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', 'ไม่สามารถโหลดรายการสินค้าได้: ' + err.message);
+    })
+    .getPOItems(poNo);
+}
+
+// ── LINE MESSAGE LOGS ──
+let allLineLogs = [];
+
+function loadLineLog() {
+  const tbody = document.getElementById('lineLogTableBody');
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล Log...</td></tr>';
+  
+  google.script.run.withSuccessHandler(logs => {
+    allLineLogs = logs || [];
+    renderLineLogTable(allLineLogs);
+    calculateLineLogStats(allLineLogs);
+  }).withFailureHandler(err => {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-5">โหลดข้อมูลผิดพลาด: ${err.message}</td></tr>`;
+  }).getLineLogs();
+}
+
+function renderLineLogTable(logs) {
+  const tbody = document.getElementById('lineLogTableBody');
+  if (!logs.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">ไม่มีประวัติ Log การส่ง LINE</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = logs.map(l => {
+    const isFree = l.costStatus.indexOf('ฟรี') > -1;
+    const isPush = l.method.indexOf('Push') > -1;
+    
+    const costBadge = isFree
+      ? `<span class="badge bg-success-light text-success"><i class="bi bi-gift me-1"></i>ฟรี (Reply)</span>`
+      : `<span class="badge bg-warning-light text-warning"><i class="bi bi-currency-dollar me-1"></i>คิดเงิน (Push)</span>`;
+      
+    const methodBadge = isPush
+      ? `<span class="badge bg-info-light text-info">Push</span>`
+      : `<span class="badge bg-secondary-light text-secondary">Reply</span>`;
+      
+    const codeClass = String(l.code).trim() === '200' ? 'text-success fw-bold' : 'text-danger fw-bold';
+    
+    return `<tr>
+      <td data-label="วันเวลา">${l.timestamp}</td>
+      <td data-label="ประเภทคำสั่ง">${methodBadge}</td>
+      <td data-label="ประเภทข้อความ"><span class="badge bg-light text-dark">${l.msgType}</span></td>
+      <td data-label="ผู้รับ" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${l.recipient}">${l.recipient}</td>
+      <td data-label="ข้อความพรีวิว" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${l.preview}">${l.preview}</td>
+      <td data-label="สถานะค่าบริการ">${costBadge}</td>
+      <td data-label="HTTP Code" class="text-center ${codeClass}">${l.code}</td>
+    </tr>`;
+  }).join('');
+}
+
+function calculateLineLogStats(logs) {
+  const total = logs.length;
+  const free = logs.filter(l => l.costStatus.indexOf('ฟรี') > -1).length;
+  const paid = logs.filter(l => l.costStatus.indexOf('คิดเงิน') > -1).length;
+  
+  document.getElementById('lineLogTotalCount').textContent = total.toLocaleString();
+  document.getElementById('lineLogFreeCount').textContent = free.toLocaleString();
+  document.getElementById('lineLogPaidCount').textContent = paid.toLocaleString();
+}
+
+function filterLineLogs() {
+  const q = document.getElementById('lineLogSearch').value.toLowerCase();
+  const cost = document.getElementById('lineLogCostFilter').value;
+  const method = document.getElementById('lineLogMethodFilter').value;
+  
+  const filtered = allLineLogs.filter(l => {
+    const matchQuery = !q || 
+      l.recipient.toLowerCase().includes(q) || 
+      l.preview.toLowerCase().includes(q);
+      
+    const matchCost = !cost || l.costStatus.includes(cost);
+    const matchMethod = !method || l.method.includes(method);
+    
+    return matchQuery && matchCost && matchMethod;
+  });
+  
+  renderLineLogTable(filtered);
+}
+
+function confirmClearLineLogs() {
+  Swal.fire({
+    title: 'ยืนยันการล้างประวัติ Log?',
+    text: 'ข้อมูลประวัติการส่ง LINE ทั้งหมดจะถูกลบออกจากชีทถาวร!',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#EF4444',
+    cancelButtonColor: '#6B7280',
+    confirmButtonText: 'ใช่, ลบทั้งหมด!',
+    cancelButtonText: 'ยกเลิก'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      Swal.fire({
+        title: 'กำลังลบข้อมูล...',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+      });
+      
+      google.script.run.withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) {
+          showToast('success', 'ล้างประวัติ Log เรียบร้อย');
+          loadLineLog();
+        } else {
+          showToast('error', res.message || 'เกิดข้อผิดพลาด');
+        }
+      }).withFailureHandler(err => {
+        Swal.close();
+        showToast('error', err.message);
+      }).clearLineLogs();
+    }
   });
 }
 

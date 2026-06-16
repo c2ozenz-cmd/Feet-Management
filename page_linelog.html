@@ -1,0 +1,79 @@
+<div class="page-header">
+  <div>
+    <h2 class="page-title"><i class="bi bi-chat-left-text me-2" style="color:var(--claude-primary)"></i>Log การส่ง LINE</h2>
+    <p class="page-subtitle">ตรวจสอบประวัติการแจ้งเตือนและการตอบกลับผ่านระบบ LINE (วิเคราะห์โควตาข้อความ)</p>
+  </div>
+  <button class="btn btn-outline-danger admin-only" onclick="confirmClearLineLogs()">
+    <i class="bi bi-trash me-1"></i>ล้างประวัติ Log
+  </button>
+</div>
+
+<!-- Stats Card -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#F8FAFC;border-left:4px solid var(--claude-primary)">
+      <div style="font-size:24px;color:var(--claude-primary)"><i class="bi bi-chat-dots-fill"></i></div>
+      <div>
+        <div class="text-muted small">ส่งข้อความทั้งหมด</div>
+        <h4 class="mb-0 fw-bold" id="lineLogTotalCount">0</h4>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#F0FDF4;border-left:4px solid #10B981">
+      <div style="font-size:24px;color:#10B981"><i class="bi bi-chat-quote-fill"></i></div>
+      <div>
+        <div class="text-muted small">ตอบกลับ (ฟรี)</div>
+        <h4 class="mb-0 fw-bold text-success" id="lineLogFreeCount">0</h4>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#FFF7ED;border-left:4px solid #F59E0B">
+      <div style="font-size:24px;color:#F59E0B"><i class="bi bi-send-fill"></i></div>
+      <div>
+        <div class="text-muted small">แจ้งเตือนระบบ (คิดเงิน)</div>
+        <h4 class="mb-0 fw-bold text-warning" id="lineLogPaidCount">0</h4>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Search and Filters -->
+<div class="search-bar">
+  <input type="text" id="lineLogSearch" class="form-control" placeholder="ค้นหาข้อความ / ผู้รับ..." oninput="filterLineLogs()">
+  <select id="lineLogCostFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()">
+    <option value="">ทุกสถานะค่าบริการ</option>
+    <option value="ฟรี">เฉพาะฟรี (Reply)</option>
+    <option value="คิดเงิน">เฉพาะคิดเงิน (Push)</option>
+  </select>
+  <select id="lineLogMethodFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()">
+    <option value="">ทุกคำสั่ง API</option>
+    <option value="Push">Push (บอททักก่อน)</option>
+    <option value="Reply">Reply (ตอบกลับแชท)</option>
+  </select>
+</div>
+
+<!-- Table -->
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>วันเวลา</th>
+            <th>ประเภทคำสั่ง</th>
+            <th>ประเภทข้อความ</th>
+            <th>ผู้รับ</th>
+            <th>ข้อความพรีวิว</th>
+            <th>สถานะค่าบริการ</th>
+            <th class="text-center">HTTP Code</th>
+          </tr>
+        </thead>
+        <tbody id="lineLogTableBody">
+          <tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

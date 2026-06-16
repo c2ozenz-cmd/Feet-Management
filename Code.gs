@@ -14,7 +14,8 @@ const SHEETS = {
   poItems  : 'POItems',
   stock    : 'Stock',
   stockLog : 'StockLog',
-  shops    : 'Shops'
+  shops    : 'Shops',
+  lineLog  : 'LineLog'
 };
 
 // ── ดึง sheet พร้อม guard (throw ถ้าไม่เจอ) ──
@@ -283,6 +284,20 @@ function saveRepair(repair, parts) {
     const repSheet   = getSheet('repairs');
     const partsSheet = getSheet('parts');
     let repairNo = repair.repairNo;
+    
+    if (repairNo) {
+      // เช็คสถานะปัจจุบันก่อนบันทึกแก้ไข หากเสร็จแล้ว ห้ามแก้ไข
+      const data = repSheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === repairNo) {
+          if (String(data[i][8] || '') === 'เสร็จแล้ว') {
+            return { success: false, message: 'ไม่อนุญาตให้แก้ไขใบแจ้งซ่อมที่ปิดงานเสร็จสิ้นแล้ว' };
+          }
+          break;
+        }
+      }
+    }
+
     if (!repairNo) {
       repairNo = generateRepairNumber();
       repSheet.appendRow([
@@ -378,14 +393,33 @@ function sendRepairToLine(repairNo) {
   } catch (e) { return { success: false, message: e.message }; }
 }
 
+function forceSendRepairToLine(repairNo) {
+  try {
+    const repairs = getRepairs();
+    const repair  = repairs.find(r => r.repairNo === repairNo);
+    if (!repair) return { success: false, message: 'ไม่พบรายการซ่อม' };
+    const result = notifyRepairToLine(repair);
+    if (result.success) markLineSent('repair', repairNo);
+    return result;
+  } catch (e) { return { success: false, message: e.message }; }
+}
+
 function updateRepairStatus(repairNo, status) {
   try {
     const sheet = getSheet('repairs');
     const data  = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === repairNo) {
+        const oldStatus = String(data[i][8] || '');
+        if (oldStatus === status) return { success: true };
+        
         sheet.getRange(i + 1, 9).setValue(status);
-        if (status === 'เสร็จแล้ว') deductStockForRepair(repairNo);
+        if (status === 'เสร็จแล้ว') {
+          deductStockForRepair(repairNo);
+        } else if (oldStatus === 'เสร็จแล้ว') {
+          // หากย้อนกลับสถานะออกจาก "เสร็จแล้ว" ให้คืนสต็อก
+          restoreStockForRepair(repairNo);
+        }
         return { success: true };
       }
     }
@@ -663,22 +697,103 @@ function sendPOToLine(poNo) {
   }
 }
 
-
-function updatePOStatus(poNo, status, approvedBy = '', syncStock = true) {
+function forceSendPOToLine(poNo) {
   try {
-    const sheet = getSheet('po');
-    const data  = sheet.getDataRange().getValues();
+    const pos = getPOs();
+    const po  = pos.find(p => p.poNo === poNo);
+    if (!po) return { success: false, message: 'ไม่พบ PO: ' + poNo };
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const poSheet = ss.getSheetByName('PurchaseOrders');
+    if (!poSheet) return { success: false, message: 'ไม่พบชีต PurchaseOrders' };
+
+    const data = poSheet.getDataRange().getValues();
+    const headers = data[0];
+    const poNoIdx = headers.indexOf('PONo');
+    const row = data.find((r, i) => i > 0 && String(r[poNoIdx]).trim() === String(poNo).trim());
+    if (!row) return { success: false, message: 'ไม่พบ PO: ' + poNo };
+
+    const poRaw = {};
+    headers.forEach((h, i) => { poRaw[h] = row[i]; });
+
+    const poObj = {
+      poNo        : poRaw['PONo']        || '',
+      shopName    : poRaw['ShopName']    || '',
+      shopAddress : poRaw['ShopAddress'] || '',
+      taxId       : poRaw['TaxID']       || '',
+      issueDate   : poRaw['IssueDate']   || '',
+      refRepairNo : poRaw['RefRepairNo'] || '',
+      plate       : poRaw['Plate']       || '',
+      vatType     : poRaw['VatType']     || 'none',
+      createdBy   : poRaw['CreatedBy']   || '',
+      pdfUrl      : poRaw['pdfUrl']      || ''
+    };
+
+    let items = [];
+    const itemSheet = ss.getSheetByName('POItems');
+    if (itemSheet) {
+      const iData = itemSheet.getDataRange().getValues();
+      if (iData.length > 1) {
+        const iHdr     = iData[0];
+        const iPoNoIdx = iHdr.findIndex(h => String(h).toLowerCase() === 'pono');
+        items = iData.slice(1)
+          .filter(r => String(r[iPoNoIdx]).trim() === String(poNo).trim())
+          .map(r => {
+            const obj = {};
+            iHdr.forEach((h, i) => { obj[String(h).toLowerCase()] = r[i]; });
+            return {
+              partName     : obj['partname']     || '',
+              qty          : Number(obj['qty'])          || 0,
+              unit         : obj['unit']         || '',
+              pricePerUnit : Number(obj['priceperunit']) || 0,
+              discount     : Number(obj['discount'])     || 0,
+              amount       : Number(obj['amount'])       || 0
+            };
+          });
+      }
+    }
+
+    const result = notifyPOToLine(poObj, items);
+    if (result.success) markLineSent('po', poNo);
+    return result;
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+
+function updatePOStatus(poNo, status, approvedBy, syncStock) {
+  try {
+    approvedBy = approvedBy || '';
+    syncStock  = syncStock !== false;
+
+    const sheet   = getSheet('po');
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => String(h || '').trim());
+
+    const statusIdx   = headers.indexOf('Status');
+    const approvedByIdx = headers.indexOf('approvedBy');
+    const approvedAtIdx = headers.indexOf('approvedAt');
+
+    if (statusIdx < 0) return { success: false, message: 'ไม่พบ column Status' };
+
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === poNo) {
-        sheet.getRange(i + 1, 11).setValue(status);
+        // อัปเดต Status
+        sheet.getRange(i + 1, statusIdx + 1).setValue(status);
+
+        // อัปเดต approvedBy / approvedAt เมื่ออนุมัติ
         if (status === 'อนุมัติแล้ว') {
-          sheet.getRange(i + 1, 16).setValue(approvedBy);
-          sheet.getRange(i + 1, 17).setValue(new Date().toISOString());
+          if (approvedByIdx >= 0) sheet.getRange(i + 1, approvedByIdx + 1).setValue(approvedBy);
+          if (approvedAtIdx >= 0) sheet.getRange(i + 1, approvedAtIdx + 1).setValue(new Date().toISOString());
         }
+
+        // รับของแล้ว → sync stock
         if (status === 'รับของแล้ว' && syncStock) {
           addStockFromPO(poNo);
           syncPOPartsToRepair(poNo);
         }
+
         return { success: true };
       }
     }
@@ -709,18 +824,40 @@ function syncPOPartsToRepair(poNo) {
     const items = getPOItems(poNo);
     if (!items.length) return { success: true };
 
-    // ดึง repair parts ที่มีอยู่แล้ว (กัน duplicate)
+    // ดึง repair parts ที่มีอยู่แล้วเพื่อตรวจเช็ค
     const existingParts = partsSheet.getDataRange().getValues();
-    const existingNames = existingParts
-      .slice(1)
-      .filter(r => r[0] === refRepairNo)
-      .map(r => String(r[2] || '').toLowerCase());
 
-    // เพิ่มเฉพาะที่ยังไม่มี
+    // ดำเนินการอัปเดตหรือเพิ่มรายการใหม่
     items.forEach((item, idx) => {
-      const name = String(item.partName || '');
-      if (name && !existingNames.includes(name.toLowerCase())) {
-        partsSheet.appendRow([refRepairNo, Date.now() + idx, name, item.qty]);
+      const name = String(item.partName || '').trim();
+      if (!name) return;
+
+      let foundRowIndex = -1;
+      // ค้นหาแถวที่มี refRepairNo และ PartName ตรงกัน (case-insensitive)
+      for (let i = 1; i < existingParts.length; i++) {
+        if (existingParts[i][0] === refRepairNo && 
+            String(existingParts[i][2] || '').trim().toLowerCase() === name.toLowerCase()) {
+          foundRowIndex = i;
+          break;
+        }
+      }
+
+      if (foundRowIndex >= 0) {
+        // หากเคยมีอยู่แล้วในจ็อบซ่อมนี้ ให้บวกจำนวนเพิ่มเข้าไปในเซลล์เดิม (คอลัมน์ที่ 4 ของชีท parts)
+        const currentQty = parseFloat(existingParts[foundRowIndex][3]) || 0;
+        const addQty     = parseFloat(item.qty) || 0;
+        const newQty     = currentQty + addQty;
+        partsSheet.getRange(foundRowIndex + 1, 4).setValue(newQty);
+        
+        // อัปเดตข้อมูลจำลองในอาเรย์ด้วย เผื่อกรณีใน PO ใบนี้หรือใบถัดไปมีรายการซ้ำกันอีก
+        existingParts[foundRowIndex][3] = newQty;
+      } else {
+        // หากยังไม่มี ให้บันทึกเป็นรายการใหม่
+        const newRow = [refRepairNo, Date.now() + idx, name, item.qty];
+        partsSheet.appendRow(newRow);
+        
+        // อัปเดตข้อมูลจำลองในอาเรย์เพื่อใช้เช็คในลูปรายการถัดไป
+        existingParts.push(newRow);
       }
     });
 
@@ -734,9 +871,25 @@ function deletePO(poNo) {
     const itemsSheet = getSheet('poItems');
 
     const pd = poSheet.getDataRange().getValues();
-    for (let i = pd.length - 1; i >= 1; i--) {
-      if (pd[i][0] === poNo) poSheet.deleteRow(i + 1);
+    let poRowIndex = -1;
+    let poStatus = '';
+    for (let i = 1; i < pd.length; i++) {
+      if (pd[i][0] === poNo) {
+        poRowIndex = i;
+        poStatus = String(pd[i][10] || ''); // col 11 = Status
+        break;
+      }
     }
+    
+    if (poRowIndex < 0) return { success: false, message: 'ไม่พบ PO: ' + poNo };
+    
+    // บล็อกไม่อนุญาตให้ลบ PO ที่อนุมัติแล้ว หรือรับของแล้ว
+    if (poStatus === 'รับของแล้ว' || poStatus === 'อนุมัติแล้ว') {
+      return { success: false, message: 'ไม่อนุญาตให้ลบใบ PO ที่มีสถานะ "' + poStatus + '" กรุณายกเลิกหรือเปลี่ยนสถานะก่อน' };
+    }
+
+    poSheet.deleteRow(poRowIndex + 1);
+    
     const id = itemsSheet.getDataRange().getValues();
     for (let i = id.length - 1; i >= 1; i--) {
       if (id[i][0] === poNo) itemsSheet.deleteRow(i + 1);
@@ -768,10 +921,31 @@ function getStock() {
     const sheet = getSheetSafe('stock');
     if (!sheet) return [];
     const data = sheet.getDataRange().getValues();
-    return data.slice(1).filter(r => r[0]).map(r => ({
-      id: r[0], partCode: r[1], partName: r[2], unit: r[3],
-      qty: r[4], minQty: r[5], location: r[6], note: r[7]
-    }));
+
+    // ดึงราคาซื้อล่าสุดจาก poItems
+    const poItemsSheet = getSheetSafe('poItems');
+    const lastPrices = {};
+    if (poItemsSheet) {
+      const poItemsData = poItemsSheet.getDataRange().getValues();
+      // แถวที่เขียนทีหลัง (ด้านล่าง) จะทับแถวที่เขียนก่อนหน้า ซึ่งหมายถึงเป็นราคาล่าสุด
+      for (let i = 1; i < poItemsData.length; i++) {
+        const partName = String(poItemsData[i][2] || '').trim();
+        const price = parseFloat(poItemsData[i][5]) || 0;
+        if (partName) {
+          lastPrices[partName.toLowerCase()] = price;
+        }
+      }
+    }
+
+    return data.slice(1).filter(r => r[0]).map(r => {
+      const partName = String(r[2] || '').trim();
+      const partNameKey = partName.toLowerCase();
+      return {
+        id: r[0], partCode: r[1], partName: r[2], unit: r[3],
+        qty: r[4], minQty: r[5], location: r[6], note: r[7],
+        lastPrice: lastPrices[partNameKey] || 0
+      };
+    });
   } catch (e) { return []; }
 }
 
@@ -842,54 +1016,98 @@ function addStockFromPO(poNo) {
   } catch (e) { return { success: false, message: e.message }; }
 }
 function deductStockForRepair(repairNo) {
+  try {
+    const stockSheet = getSheet('stock');
+    const logSheet   = getSheetSafe('stockLog');
+    if (!logSheet) return;
 
-  const stockSheet = getSheet('stock');
-  const logSheet   = getSheet('stockLog');
-
-  const parts = getRepairParts(repairNo);
-
-  if (!parts || !parts.length) return;
-
-  const stockData = stockSheet.getDataRange().getValues();
-
-  parts.forEach(part => {
-
-    for (let i = 1; i < stockData.length; i++) {
-
-      const stockPartName = String(stockData[i][2] || '').trim();
-      const repairPartName = String(part.partName || '').trim();
-
-      if (stockPartName === repairPartName) {
-
-        const currentQty = parseFloat(stockData[i][4] || 0);
-        const deductQty  = parseFloat(part.qty || 0);
-
-        const newQty = currentQty - deductQty;
-
-        stockSheet.getRange(i + 1, 5).setValue(newQty);
-
-        // log
-        logSheet.appendRow([
-          new Date(),
-          'OUT',
-          repairPartName,
-          deductQty,
-          'Repair: ' + repairNo
-        ]);
-
-        break;
+    // เช็คประวัติป้องกันการตัดสต็อกซ้ำซ้อน
+    const logData = logSheet.getDataRange().getValues();
+    for (let i = 1; i < logData.length; i++) {
+      if (String(logData[i][1]) === 'OUT' && String(logData[i][4]) === 'Repair: ' + repairNo) {
+        return; // เคยตัดแล้ว ข้ามเลยเพื่อความปลอดภัย
       }
     }
 
-  });
+    const parts = getRepairParts(repairNo);
+    if (!parts || !parts.length) return;
 
+    const stockData = stockSheet.getDataRange().getValues();
+
+    parts.forEach(part => {
+      for (let i = 1; i < stockData.length; i++) {
+        const stockPartName = String(stockData[i][2] || '').trim().toLowerCase();
+        const repairPartName = String(part.partName || '').trim().toLowerCase();
+
+        if (stockPartName === repairPartName) {
+          const currentQty = parseFloat(stockData[i][4] || 0);
+          const deductQty  = parseFloat(part.qty || 0);
+          const newQty     = Math.max(0, currentQty - deductQty);
+
+          stockSheet.getRange(i + 1, 5).setValue(newQty);
+
+          // log
+          logSheet.appendRow([
+            new Date(),
+            'OUT',
+            part.partName,
+            deductQty,
+            'Repair: ' + repairNo
+          ]);
+
+          break;
+        }
+      }
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function restoreStockForRepair(repairNo) {
+  try {
+    const stockSheet = getSheet('stock');
+    const logSheet   = getSheetSafe('stockLog');
+    if (!logSheet) return { success: false, message: 'ไม่พบชีทสต็อกล็อก' };
+
+    const logData   = logSheet.getDataRange().getValues();
+    const stockData = stockSheet.getDataRange().getValues();
+
+    // ค้นหาย้อนหลังจากล่างขึ้นบนเพื่อความปลอดภัยในการลบแถว
+    let restoredCount = 0;
+    for (let i = logData.length - 1; i >= 1; i--) {
+      const type = String(logData[i][1] || '');
+      const ref  = String(logData[i][4] || '');
+
+      if (type === 'OUT' && ref === 'Repair: ' + repairNo) {
+        const partName = String(logData[i][2] || '').trim().toLowerCase();
+        const qty      = parseFloat(logData[i][3]) || 0;
+
+        // บวกคืนเข้าคลัง Stock
+        for (let j = 1; j < stockData.length; j++) {
+          if (String(stockData[j][2] || '').trim().toLowerCase() === partName) {
+            const currentQty = parseFloat(stockData[j][4] || 0);
+            stockSheet.getRange(j + 1, 5).setValue(currentQty + qty);
+            stockData[j][4] = currentQty + qty; // อัปเดตข้อมูลจำลอง
+            break;
+          }
+        }
+
+        // ลบแถวประวัติออก
+        logSheet.deleteRow(i + 1);
+        restoredCount++;
+      }
+    }
+    return { success: true, restoredCount };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 }
 
 function logStockTransaction(type, partName, qty, ref) {
   try {
     const sheet = getSheetSafe('stockLog');
     if (!sheet) return;
-    sheet.appendRow([new Date().toISOString(), type, partName, qty, ref]);
+    const logId = 'LOG' + Date.now() + '_' + Math.floor(Math.random() * 10000); 
+    sheet.appendRow([new Date().toISOString(), type, partName, qty, ref, logId]);
   } catch (e) { /* ignore */ }
 }
 
@@ -905,22 +1123,88 @@ function manualDeductStock(items, date, plate, note) {
           const currentQty = parseFloat(data[i][4]) || 0;
           const deductQty  = parseFloat(item.qty)   || 0;
           const newQty     = Math.max(0, currentQty - deductQty);
-          const price      = parseFloat(item.pricePerUnit) || 0;  // ← เพิ่ม
+          const price      = parseFloat(item.pricePerUnit) || 0;
 
           stockSheet.getRange(i + 1, 5).setValue(newQty);
-          logStockTransaction(
-            'OUT-MANUAL',
-            data[i][2],
-            deductQty,
-            `วันที่:${date} | ทะเบียน:${plate} | ราคา:${price} | หมายเหตุ:${note || '-'}`
-          );
-          results.push({ partName: data[i][2], before: currentQty, after: newQty });
+
+         
+          const logId = 'LOG' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+          const ref = `วันที่:${date} | ทะเบียน:${plate} | ราคา:${price} | หมายเหตุ:${note || '-'}`;
+          
+          const logSheet = getSheetSafe('stockLog');
+          if (logSheet) {
+            logSheet.appendRow([new Date().toISOString(), 'OUT-MANUAL', data[i][2], deductQty, ref, logId]);
+          }
+
+          results.push({ 
+            partName: data[i][2], 
+            stockId : item.stockId,
+            before  : currentQty, 
+            after   : newQty,
+            logId  
+          });
           break;
         }
       }
     });
 
     return { success: true, results };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+function cancelDeductStock(logId) {
+  try {
+    if (!logId) return { success: false, message: 'logId ไม่ถูกต้อง' };
+    const logSheet   = getSheet('stockLog');
+    const stockSheet = getSheet('stock');
+    const logData    = logSheet.getDataRange().getValues();
+
+    // หา log row จาก logId (col index 5)
+    let targetRow = -1;
+    let partName  = '';
+    let qty       = 0;
+
+    for (let i = 1; i < logData.length; i++) {
+      if (String(logData[i][5] || '') === logId) {
+        // เช็คว่ายกเลิกไปแล้วหรือยัง
+        if (String(logData[i][1]) === 'CANCEL') {
+          return { success: false, message: 'รายการนี้ถูกยกเลิกไปแล้ว' };
+        }
+        targetRow = i;
+        partName  = String(logData[i][2] || '');
+        qty       = parseFloat(logData[i][3]) || 0;
+        break;
+      }
+    }
+
+    if (targetRow < 0) return { success: false, message: 'ไม่พบ logId: ' + logId };
+
+    // บวกจำนวนคืนใน Stock
+    const stockData = stockSheet.getDataRange().getValues();
+    let restored = false;
+    for (let i = 1; i < stockData.length; i++) {
+      if (String(stockData[i][2] || '') === partName) {
+        const currentQty = parseFloat(stockData[i][4]) || 0;
+        stockSheet.getRange(i + 1, 5).setValue(currentQty + qty);
+        restored = true;
+        break;
+      }
+    }
+
+    if (!restored) return { success: false, message: 'ไม่พบอะไหล่ "' + partName + '" ใน Stock' };
+
+    // อัปเดต type เป็น CANCEL ใน log
+    logSheet.getRange(targetRow + 1, 2).setValue('CANCEL');
+
+    // อัปเดต Ref โดยใส่ข้อมูลการยกเลิกต่อท้ายแถวเดิม
+    const origRef = String(logData[targetRow][4] || '');
+    const timestampStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+    const cancelRef = origRef + ' (ยกเลิกเมื่อ ' + timestampStr + ')';
+    logSheet.getRange(targetRow + 1, 5).setValue(cancelRef);
+
+    return { success: true, partName, qty };
   } catch (e) {
     return { success: false, message: e.message };
   }
@@ -936,9 +1220,9 @@ function getStockLog(limit) {
       type      : String(r[1] || ''),
       partName  : String(r[2] || ''),
       qty       : parseFloat(r[3]) || 0,
-      ref       : String(r[4] || '')
+      ref       : String(r[4] || ''),
+      logId     : String(r[5] || '')
     }));
-    // เรียงใหม่สุดก่อน
     rows.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     return limit ? rows.slice(0, limit) : rows;
   } catch(e) { return []; }
@@ -1597,9 +1881,9 @@ function initializeSheets() {
     [SHEETS.repairs]  : ['RepairNo', 'Date', 'Plate', 'Chassis', 'Mileage', 'RepairList','repairSummary', 'Status', 'CreatedBy', 'CreatedAt'],
     [SHEETS.parts]    : ['RepairNo', 'PartName', 'Qty'],
     [SHEETS.po] : ['PONo', 'ShopName', 'ShopAddress', 'TaxID', 'IssueDate', 'QuoteDate', 'RefRepairNo', 'QuoteNo', 'Plate', 'VatType', 'Status', 'CreatedBy', 'CreatedAt', 'createdBySignatureUrl', 'approvedBy', 'approvedAt', 'lineSentAt', 'pdfUrl', 'printedAt'],
-    [SHEETS.poItems]  : ['PONo', 'PartName', 'Qty', 'Unit', 'PricePerUnit', 'Discount', 'Amount', 'Note'],
+    [SHEETS.poItems]  : ['PONo', 'No', 'PartName', 'Qty', 'Unit', 'PricePerUnit', 'Discount', 'Amount', 'Note'],
     [SHEETS.stock]    : ['ID', 'PartCode', 'PartName', 'Unit', 'Qty', 'MinQty', 'Location', 'Note'],
-    [SHEETS.stockLog] : ['Timestamp', 'Type', 'PartName', 'Qty', 'Ref'],
+    [SHEETS.stockLog] : ['Timestamp', 'Type', 'PartName', 'Qty', 'Ref', 'LogId'],
     [SHEETS.shops]    :['ID','Name','Address','TaxID','Phone','Note'],
     'OilTemplates' : ['TemplateID','Program','Plate','PartName','Qty','Unit','PricePerUnit']
   };
@@ -1642,6 +1926,43 @@ function markPOAsPrinted(poNo) {
       return { success: true };
     }
     return { success: false, message: 'ไม่พบ PO' };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+// ---------- LINE MESSAGE LOGGING ----------
+function getLineLogs() {
+  try {
+    const sheet = getSheetSafe('lineLog');
+    if (!sheet) return [];
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return [];
+    
+    // เรียงจากใหม่สุดไปเก่าสุด
+    return data.slice(1).reverse().map(r => ({
+      timestamp  : r[0] instanceof Date 
+        ? Utilities.formatDate(r[0], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') 
+        : String(r[0] || ''),
+      method     : String(r[1] || ''),
+      msgType    : String(r[2] || ''),
+      recipient  : String(r[3] || ''),
+      preview    : String(r[4] || ''),
+      costStatus : String(r[5] || ''),
+      code       : String(r[6] || '')
+    }));
+  } catch (e) { return []; }
+}
+
+function clearLineLogs() {
+  try {
+    const sheet = getSheetSafe('lineLog');
+    if (!sheet) return { success: false, message: 'ไม่พบชีต LineLog' };
+    
+    if (sheet.getLastRow() > 1) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clearContent();
+    }
+    return { success: true };
   } catch (e) {
     return { success: false, message: e.message };
   }

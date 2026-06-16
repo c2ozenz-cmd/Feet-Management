@@ -12,6 +12,7 @@
 
   <div class="search-bar">
     <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า..." oninput="filterPOs()">
+    <input type="month" id="poMonthFilter" class="form-control" style="max-width:180px" onchange="filterPOs()">
     <select id="poStatusFilter" class="form-select" style="max-width:180px" onchange="filterPOs()">
       <option value="">ทุกสถานะ</option>
       <option value="รออนุมัติ">รออนุมัติ</option>
