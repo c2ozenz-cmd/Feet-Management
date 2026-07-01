@@ -107,6 +107,27 @@ function doPost(e) {
           return;
         }
 
+        // ── ส่งสถานะ PO (ดึง Flex อนุมัติพร้อม PDF — ฟรี ใช้ replyToken) ──
+        const statusPoMatch = cleanText.match(/ส่งสถานะ\s*(?:PO\s*)?(PO\d+)/i);
+        if (statusPoMatch) {
+          const poNo = statusPoMatch[1].toUpperCase();
+          const po   = getPOs().find(p => p.poNo === poNo);
+          if (!po) {
+            replyLineMessage(event.replyToken, `❌ ไม่พบข้อมูลใบสั่งซื้อ ${poNo} ในระบบ`);
+            return;
+          }
+          if (po.status !== 'อนุมัติแล้ว') {
+            replyLineMessage(event.replyToken, `ℹ️ ${poNo} ยังไม่ได้รับการอนุมัติ\nสถานะปัจจุบัน: "${po.status}"`);
+            return;
+          }
+          const approverName = po.approvedBy || '—';
+          const approvedAt   = po.approvedAt ? formatDateTH(new Date(po.approvedAt)) : formatDateTH(new Date());
+          const plate        = po.plate || '';
+          const pdfUrl       = po.pdfUrl || '';
+          replyLineFlex(event.replyToken, buildPOApprovalFlex(poNo, approverName, approvedAt, plate, pdfUrl));
+          return;
+        }
+
         // ── ลงทะเบียน Line ID ──
         // registerLineUserId(lineUserId, text);
         // replyLineMessage(event.replyToken,
@@ -239,11 +260,16 @@ function handlePostback(event) {
       const res = updatePOStatus(id, 'อนุมัติแล้ว');
       if (res.success) {
         saveApprovalInfo('po', id, lineUserId);
-        SpreadsheetApp.flush(); // Ensure approval info is written before PDF generation
+        const plate = po?.plate || '';
+        // สร้าง PDF ก่อน (ช้าหน่อยได้ — LINE แสดง displayText อัตโนมัติแล้ว)
+        SpreadsheetApp.flush();
         const pdfRes = generateAndSavePOPdf(id);
         const pdfUrl = (pdfRes && pdfRes.success) ? pdfRes.pdfUrl : '';
-        const plate   = po?.plate || ''; 
-        replyLineFlex(replyToken, buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl));
+        // push Flex พร้อม PDF ไปกลุ่มทีเดียว (1 ข้อความ)
+        const groupId = getLineGroupId('po');
+        if (groupId) {
+          pushLineFlex(groupId, buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl));
+        }
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
       }
@@ -799,6 +825,15 @@ function replyLineFlex(replyToken, flexObj) {
   if (!token) return;
   callLineAPI('https://api.line.me/v2/bot/message/reply', {
     replyToken,
+    messages: [flexObj]
+  }, token);
+}
+
+function pushLineFlex(to, flexObj) {
+  const token = getLineToken();
+  if (!token || !to) return;
+  callLineAPI('https://api.line.me/v2/bot/message/push', {
+    to,
     messages: [flexObj]
   }, token);
 }
