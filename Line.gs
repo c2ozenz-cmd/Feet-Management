@@ -233,7 +233,7 @@ function handlePostback(event) {
       const res = updateRepairStatus(id, 'กำลังซ่อม');
       if (res.success) {
         saveApprovalInfo('repair', id, lineUserId);
-        // ── ส่ง Flex ผลอนุมัติไปกลุ่ม (พร้อมปุ่มช่าง) ──
+        // ── ส่ง Flex ผลอนุมัติไปกลุ่ม (พร้อมปุ่มช่าง) — Reply ฟรี ──
         const plate   = repair?.plate || '';
         replyLineFlex(replyToken, buildApprovalResultFlex('repair', id, approverName, dateStr, plate));
       } else {
@@ -261,14 +261,31 @@ function handlePostback(event) {
       if (res.success) {
         saveApprovalInfo('po', id, lineUserId);
         const plate = po?.plate || '';
-        // สร้าง PDF ก่อน (ช้าหน่อยได้ — LINE แสดง displayText อัตโนมัติแล้ว)
+
+        // ── สร้าง PDF (ครอบ try/catch กันค้างทั้ง process ถ้าสร้าง PDF พัง) ──
         SpreadsheetApp.flush();
-        const pdfRes = generateAndSavePOPdf(id);
-        const pdfUrl = (pdfRes && pdfRes.success) ? pdfRes.pdfUrl : '';
-        // push Flex พร้อม PDF ไปกลุ่มทีเดียว (1 ข้อความ)
-        const groupId = getLineGroupId('po');
-        if (groupId) {
-          pushLineFlex(groupId, buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl));
+        let pdfUrl = '';
+        try {
+          const pdfRes = generateAndSavePOPdf(id);
+          pdfUrl = (pdfRes && pdfRes.success) ? pdfRes.pdfUrl : '';
+        } catch (pdfErr) {
+          Logger.log('generateAndSavePOPdf error: ' + pdfErr.message);
+        }
+
+        const flexMsg = buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl);
+
+        // ── ลองส่งแบบ Reply ก่อน (ฟรี ไม่กินโควต้า Push) ──
+        const replyRes = replyLineFlex(replyToken, flexMsg);
+
+        // ── ถ้า Reply ไม่สำเร็จ (เช่น replyToken หมดอายุเพราะ PDF ใช้เวลานาน)
+        //     ค่อย fallback เป็น Push เข้ากลุ่มแทน กันไม่ให้ Flex หายไปเฉยๆ ──
+        if (!replyRes || !replyRes.success) {
+          const groupId = getLineGroupId('po');
+          if (groupId) {
+            pushLineFlex(groupId, flexMsg);
+          } else {
+            Logger.log('PO approval flex failed to send (reply failed, no groupId fallback): ' + id);
+          }
         }
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
@@ -730,7 +747,7 @@ function buildPOApprovalFlex(poNo, approverName, date, plate, pdfUrl) {
   }
 
   return {
-    type   : 'flex',
+    type: 'flex',
     altText: `✅ อนุมัติ PO ${poNo} | 🚌 ${plate || ''} เรียบร้อย`,
     contents: contents
   };
@@ -813,8 +830,8 @@ function _flexInfoRow(label, value) {
 
 function replyLineMessage(replyToken, text) {
   const token = getLineToken();
-  if (!token) return;
-  callLineAPI('https://api.line.me/v2/bot/message/reply', {
+  if (!token) return { success: false, message: 'no token' };
+  return callLineAPI('https://api.line.me/v2/bot/message/reply', {
     replyToken,
     messages: [{ type: 'text', text }]
   }, token);
@@ -822,8 +839,8 @@ function replyLineMessage(replyToken, text) {
 
 function replyLineFlex(replyToken, flexObj) {
   const token = getLineToken();
-  if (!token) return;
-  callLineAPI('https://api.line.me/v2/bot/message/reply', {
+  if (!token) return { success: false, message: 'no token' };
+  return callLineAPI('https://api.line.me/v2/bot/message/reply', {
     replyToken,
     messages: [flexObj]
   }, token);
@@ -831,8 +848,8 @@ function replyLineFlex(replyToken, flexObj) {
 
 function pushLineFlex(to, flexObj) {
   const token = getLineToken();
-  if (!token || !to) return;
-  callLineAPI('https://api.line.me/v2/bot/message/push', {
+  if (!token || !to) return { success: false, message: 'no token or groupId' };
+  return callLineAPI('https://api.line.me/v2/bot/message/push', {
     to,
     messages: [flexObj]
   }, token);
@@ -840,8 +857,8 @@ function pushLineFlex(to, flexObj) {
 
 function pushLineMessage(to, text) {
   const token = getLineToken();
-  if (!token) return;
-  callLineAPI('https://api.line.me/v2/bot/message/push', {
+  if (!token) return { success: false, message: 'no token' };
+  return callLineAPI('https://api.line.me/v2/bot/message/push', {
     to,
     messages: [{ type: 'text', text }]
   }, token);
@@ -952,4 +969,3 @@ function formatDateTH(d) {
 // ============================================================
 // TEST FUNCTIONS
 // ============================================================
-
