@@ -1043,7 +1043,7 @@ function renderPOTable(pos) {
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
-          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="promptSendToLine('po', '${p.poNo}')" title="ส่ง/แชร์เข้า Line"><i class="bi bi-line"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งขออนุมัติเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
@@ -1247,51 +1247,29 @@ function savePO() {
             .withSuccessHandler(pdfRes => {
               Swal.close();
               if (pdfRes.success) {
-                showToast('success', 'สร้าง PDF เรียบร้อย');
+                Swal.fire({
+                  icon: 'success',
+                  title: 'บันทึก PO และสร้าง PDF เรียบร้อย',
+                  text: `ใบสั่งซื้อ PO ${res.poNo} ได้รับการบันทึกและสร้าง PDF สำเร็จ`,
+                  confirmButtonColor: '#3B82F6'
+                });
               } else {
-                showToast('warning', 'บันทึกแล้ว แต่สร้าง PDF ไม่สำเร็จ: ' + (pdfRes.message||''));
+                Swal.fire({
+                  icon: 'warning',
+                  title: 'บันทึก PO เรียบร้อย',
+                  text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้างไฟล์ PDF ไม่สำเร็จ: ${pdfRes.message || ''}`,
+                  confirmButtonColor: '#3B82F6'
+                });
               }
-
-              // ── ถามส่ง Line (พร้อม pdfUrl) ──
-              Swal.fire({
-                icon: 'success',
-                title: 'บันทึกเรียบร้อย',
-                text: 'ต้องการส่งขออนุมัติเข้า Line กลุ่มหรือไม่?',
-                showDenyButton: true,
-                showCancelButton: true,
-                confirmButtonText: '📲 ส่ง Line (อัตโนมัติ)',
-                denyButtonText: '🔗 แชร์เข้า Line',
-                cancelButtonText: 'ไม่ส่ง',
-                confirmButtonColor: '#3B82F6',
-                denyButtonColor: '#06C755',
-                cancelButtonColor: '#6B7280'
-              }).then(r => {
-                if (r.isConfirmed) {
-                  showLoading('กำลังส่ง Line...');
-                  google.script.run
-                    .withSuccessHandler(lineRes => {
-                      Swal.close();
-                      showToast(
-                        lineRes.success ? 'success' : 'error',
-                        lineRes.success
-                          ? 'ส่ง Line เรียบร้อย'
-                          : (lineRes.message || 'ส่ง Line ไม่สำเร็จ')
-                      );
-                    })
-                    .withFailureHandler(err => {
-                      Swal.close();
-                      showToast('error', err.message);
-                    })
-                    .sendPOToLine(res.poNo);
-                } else if (r.isDenied) {
-                  sharePOToLine(res.poNo);
-                }
-              });
             })
             .withFailureHandler(err => {
               Swal.close();
-              showToast('warning', 'บันทึกแล้ว แต่สร้าง PDF error: ' + err.message);
-              // ยังถามส่ง Line ได้
+              Swal.fire({
+                icon: 'warning',
+                title: 'บันทึก PO เรียบร้อย',
+                text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้างไฟล์ PDF ล้มเหลว: ${err.message}`,
+                confirmButtonColor: '#3B82F6'
+              });
             })
             .generateAndSavePOPdf(res.poNo);
 
@@ -3746,6 +3724,74 @@ function promptSendToLine(type, id) {
       })
       .withFailureHandler(err => { Swal.close(); showToast('error', err.message); })
       [checkFn](id);
+  });
+}
+
+function sendPOToLineDirect(poNo) {
+  Swal.fire({
+    title: 'ส่งขออนุมัติเข้า Line?',
+    text: `ต้องการส่งขออนุมัติใบสั่งซื้อ ${poNo} เข้ากลุ่ม LINE หรือไม่?`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: '📲 ส่ง Line (Push)',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#3B82F6',
+    cancelButtonColor: '#6B7280'
+  }).then(r => {
+    if (!r.isConfirmed) return;
+    
+    showLoading('กำลังส่ง Line...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (res.success) {
+          showToast('success', 'ส่ง Line ขออนุมัติเรียบร้อย');
+        } else if (res.alreadySent) {
+          const sentDate = res.sentAt
+            ? new Date(res.sentAt).toLocaleString('th-TH')
+            : 'ก่อนหน้านี้';
+          
+          Swal.fire({
+            icon: 'warning',
+            title: 'เคยส่งไปแล้ว',
+            html: `<div style="font-size:14px">
+                    <b>${poNo}</b> ถูกส่ง Line ไปแล้วเมื่อ<br>
+                    <span style="color:#d97706">${sentDate}</span><br><br>
+                    ต้องการส่งซ้ำอีกครั้งหรือไม่?
+                  </div>`,
+            showCancelButton: true,
+            confirmButtonText: '📲 ส่งซ้ำ',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonColor: '#d97706',
+            cancelButtonColor: '#6B7280'
+          }).then(r2 => {
+            if (!r2.isConfirmed) return;
+            
+            showLoading('กำลังส่ง Line ซ้ำ...');
+            google.script.run
+              .withSuccessHandler(res2 => {
+                Swal.close();
+                if (res2.success) {
+                  showToast('success', 'ส่ง Line ขออนุมัติซ้ำเรียบร้อย');
+                } else {
+                  showToast('error', res2.message || 'ส่งไม่สำเร็จ');
+                }
+              })
+              .withFailureHandler(err => {
+                Swal.close();
+                showToast('error', err.message);
+              })
+              .forceSendPOToLine(poNo);
+          });
+        } else {
+          showToast('error', res.message || 'ส่งขออนุมัติไม่สำเร็จ');
+        }
+      })
+      .withFailureHandler(err => {
+        Swal.close();
+        showToast('error', err.message);
+      })
+      .sendPOToLine(poNo);
   });
 }
 
