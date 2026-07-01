@@ -1962,10 +1962,13 @@ function renderStockTable(stock) {
       <td class="text-end text-muted">${minQty}</td>
       <td class="text-muted small">${s.location || '—'}</td>
       <td>${statusBadgeHtml}</td>
-      <td class="text-center admin-only">
+      <td class="text-center">
         <div class="d-flex gap-1 justify-content-center">
-          <button class="btn btn-sm btn-outline-primary" onclick="showStockModal('${s.id}')"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-sm btn-danger" onclick="deleteStockItem('${s.id}')"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="viewPartHistory('${s.partName.replace(/'/g, "\\'")}')" title="ประวัติความเคลื่อนไหว"><i class="bi bi-clock-history"></i></button>
+          ${currentUser?.role === 'admin' ? `
+            <button class="btn btn-sm btn-outline-primary" onclick="showStockModal('${s.id}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-danger" onclick="deleteStockItem('${s.id}')" title="ลบ"><i class="bi bi-trash"></i></button>
+          ` : ''}
         </div>
       </td>
     </tr>`;
@@ -2313,6 +2316,133 @@ function loadStockLog() {
         `<tr><td colspan="6" class="text-center text-danger py-2 small">${e.message}</td></tr>`;
     })
     .getStockLog(50);  // โหลด 50 รายการล่าสุด
+}
+
+function viewPartHistory(partName) {
+  showLoading('กำลังดึงข้อมูลประวัติอะไหล่...');
+  
+  google.script.run
+    .withSuccessHandler(logs => {
+      Swal.close();
+      
+      // ฟิลเตอร์เฉพาะรายการของอะไหล่ชิ้นนี้ (case-insensitive)
+      const filteredLogs = logs.filter(l => String(l.partName || '').trim().toLowerCase() === partName.trim().toLowerCase());
+      
+      if (!filteredLogs.length) {
+        Swal.fire({
+          icon: 'info',
+          title: 'ไม่พบประวัติ',
+          text: `ไม่พบประวัติความเคลื่อนไหวของอะไหล่ "${partName}"`,
+          confirmButtonColor: '#3B82F6'
+        });
+        return;
+      }
+      
+      let tableRows = '';
+      
+      filteredLogs.forEach(l => {
+        let typeBadge = '';
+        let rowColor = '';
+        let details = '';
+        
+        if (l.type === 'IN') {
+          typeBadge = '<span class="badge bg-success-light text-success"><i class="bi bi-box-arrow-in-down me-1"></i> รับเข้า</span>';
+          rowColor = 'background-color: rgba(16, 185, 129, 0.04)';
+          
+          // ค้นหาข้อมูลร้านค้า / ทะเบียนรถจาก PO
+          const poNo = String(l.ref || '').replace('PO: ', '').trim();
+          const po = allPOs.find(p => p.poNo === poNo);
+          if (po) {
+            details = `นำเข้าจาก <b>${po.shopName || 'ร้านค้า'}</b>`;
+            if (po.plate) details += ` (สั่งให้รถทะเบียน: <b>${po.plate}</b>)`;
+          } else {
+            details = `สั่งซื้อ: <b>${l.ref}</b>`;
+          }
+          
+        } else if (l.type === 'OUT') {
+          typeBadge = '<span class="badge bg-danger-light text-danger"><i class="bi bi-box-arrow-up me-1"></i> ตัดออก (ซ่อม)</span>';
+          rowColor = 'background-color: rgba(239, 68, 68, 0.04)';
+          
+          // ค้นหาข้อมูลทะเบียนรถจากใบแจ้งซ่อม (Repair)
+          const repairNo = String(l.ref || '').replace('Repair: ', '').trim();
+          const rep = allRepairs.find(r => r.repairNo === repairNo);
+          if (rep) {
+            details = `ติดตั้งให้กับรถทะเบียน: <span class="badge bg-dark-light text-dark fw-bold">${rep.plate}</span><br>ใบซ่อม: <b>${repairNo}</b> (อาการ: ${rep.repairList || '—'})`;
+          } else {
+            details = `งานซ่อม: <b>${l.ref}</b>`;
+          }
+          
+        } else if (l.type === 'OUT-MANUAL') {
+          typeBadge = '<span class="badge bg-warning-light text-warning"><i class="bi bi-scissors me-1"></i> เบิกออก (ทั่วไป)</span>';
+          rowColor = 'background-color: rgba(245, 158, 11, 0.04)';
+          
+          // แกะรายละเอียดจาก ref: วันที่:xxxx | ทะเบียน:xxxx | ราคา:xxxx | หมายเหตุ:xxxx
+          const refStr = String(l.ref || '');
+          let plate = '';
+          let note = '';
+          const parts = refStr.split('|');
+          parts.forEach(p => {
+            const pair = p.split(':');
+            if (pair.length >= 2) {
+              const k = pair[0].trim();
+              const v = pair.slice(1).join(':').trim();
+              if (k === 'ทะเบียน') plate = v;
+              if (k === 'หมายเหตุ') note = v;
+            }
+          });
+          
+          details = `เบิกไปใช้กับรถทะเบียน: <span class="badge bg-dark-light text-dark fw-bold">${plate || '—'}</span><br>หมายเหตุ: <i>${note || '—'}</i>`;
+          
+        } else if (l.type === 'CANCEL') {
+          typeBadge = '<span class="badge bg-secondary-light text-secondary"><i class="bi bi-arrow-counterclockwise me-1"></i> ยกเลิกเบิก</span>';
+          rowColor = 'background-color: rgba(107, 114, 128, 0.04)';
+          details = `ยกเลิกการเบิกออกเดิม (ข้อมูลอ้างอิง: <i>${l.ref}</i>)`;
+        } else {
+          typeBadge = `<span class="badge bg-secondary-light text-secondary">${l.type}</span>`;
+          details = l.ref || '—';
+        }
+        
+        tableRows += `
+          <tr>
+            <td class="text-muted small align-middle" style="font-size: 11px;">${formatDate(l.timestamp)}</td>
+            <td class="align-middle">${typeBadge}</td>
+            <td class="text-end fw-bold align-middle" style="font-size: 14px; ${rowColor}">${l.qty}</td>
+            <td class="small align-middle text-start" style="line-height: 1.4;">${details}</td>
+          </tr>
+        `;
+      });
+      
+      const htmlContent = `
+        <div class="table-responsive text-start" style="max-height: 400px; border-radius: 8px; border: 1px solid #E5E7EB;">
+          <table class="table table-hover table-sm mb-0" style="font-size: 13px;">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width: 110px;">วันเวลา</th>
+                <th style="width: 130px;">ประเภท</th>
+                <th style="width: 70px;" class="text-end">จำนวน</th>
+                <th>รายละเอียด/ประวัติการใช้</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+      
+      Swal.fire({
+        title: `📊 การเคลื่อนไหวอะไหล่: ${partName}`,
+        html: htmlContent,
+        width: '800px',
+        confirmButtonText: 'ปิดหน้าต่าง',
+        confirmButtonColor: '#3D4F6B'
+      });
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', 'ไม่สามารถโหลดประวัติได้: ' + err.message);
+    })
+    .getStockLog(); // ดึงทั้งหมดเพื่อเอาไปฟิลเตอร์
 }
 
 // ── USERS ──
