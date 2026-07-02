@@ -1966,8 +1966,9 @@ function updateStockStats(stock) {
 function renderStockTable(stock) {
   const tbody = document.getElementById('stockTableBody');
   if (!tbody) return;
+  tbody.closest('table').classList.add('table-card-mobile');
   if (!stock.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="bi bi-boxes"></i>ยังไม่มีรายการอะไหล่</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" data-label=""><div class="empty-state"><i class="bi bi-boxes"></i>ยังไม่มีรายการอะไหล่</div></td></tr>`;
     return;
   }
   tbody.innerHTML = stock.map(s => {
@@ -1984,14 +1985,14 @@ function renderStockTable(stock) {
       statusBadgeHtml = '<span class="badge-status status-done"><i class="bi bi-check-circle"></i>มีพอ</span>';
     }
     return `<tr style="${rowStyle}">
-      <td class="text-muted small">${s.partCode || '—'}</td>
-      <td class="fw-semibold">${s.partName}</td>
-      <td>${s.unit}</td>
-      <td class="text-end fw-bold ${qty <= 0 ? 'text-danger' : qty <= minQty ? 'text-warning' : ''}">${qty}</td>
-      <td class="text-end text-muted">${minQty}</td>
-      <td class="text-muted small">${s.location || '—'}</td>
-      <td>${statusBadgeHtml}</td>
-      <td class="text-center">
+      <td data-label="รหัสอะไหล่" class="text-muted small">${s.partCode || '—'}</td>
+      <td data-label="ชื่ออะไหล่" class="fw-semibold">${s.partName}</td>
+      <td data-label="หน่วย">${s.unit}</td>
+      <td data-label="คงเหลือ" class="text-end fw-bold ${qty <= 0 ? 'text-danger' : qty <= minQty ? 'text-warning' : ''}">${qty}</td>
+      <td data-label="ขั้นต่ำ" class="text-end text-muted">${minQty}</td>
+      <td data-label="ที่เก็บ" class="text-muted small">${s.location || '—'}</td>
+      <td data-label="สถานะ">${statusBadgeHtml}</td>
+      <td data-label="" class="text-center">
         <div class="d-flex gap-1 justify-content-center">
           <button class="btn btn-sm btn-outline-secondary" onclick="viewPartHistory('${s.partName.replace(/'/g, "\\'")}')" title="ประวัติความเคลื่อนไหว"><i class="bi bi-clock-history"></i></button>
           ${currentUser?.role === 'admin' ? `
@@ -2213,21 +2214,23 @@ function confirmDeductPicker() {
 
 function renderDeductItems() {
   const tbody = document.getElementById('deductItemsBody');
+  if (!tbody) return;
+  tbody.closest('table').classList.add('table-card-mobile');
   if (!deductRows.length) {
     tbody.innerHTML = `<tr id="deductEmptyRow">
-      <td colspan="7" class="text-center text-muted py-3">กดเลือกจาก Stock ด้านบน</td>
+      <td colspan="7" data-label="" class="text-center text-muted py-3">กดเลือกจาก Stock ด้านบน</td>
     </tr>`;
     return;
   }
   tbody.innerHTML = deductRows.map((r, i) => {
     const overQty = r.qty > r.currentQty;
     return `<tr>
-      <td class="text-muted">${i + 1}</td>
-      <td class="fw-semibold">${r.partName}</td>
-      <td class="text-end ${r.currentQty <= 0 ? 'text-danger' : 'text-muted'}">
+      <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
+      <td data-label="ชื่ออะไหล่" class="fw-semibold">${r.partName}</td>
+      <td data-label="คงเหลือ" class="text-end ${r.currentQty <= 0 ? 'text-danger' : 'text-muted'}">
         ${r.currentQty}
       </td>
-      <td>
+      <td data-label="ตัดออก">
         <input type="number" class="form-control form-control-sm text-center
           ${overQty ? 'border-danger' : ''}"
           value="${r.qty}" min="0.01" step="0.01"
@@ -2235,7 +2238,7 @@ function renderDeductItems() {
           onchange="deductRows[${i}].qty=parseFloat(this.value)||0;renderDeductItems()">
         ${overQty ? `<div class="text-danger" style="font-size:10px">เกินคงเหลือ</div>` : ''}
       </td>
-      <td>
+      <td data-label="ราคา/หน่วย">
         <!-- ✅ เพิ่มช่องราคา -->
         <input type="number" class="form-control form-control-sm text-end"
           value="${r.pricePerUnit || 0}" min="0" step="0.01"
@@ -2243,8 +2246,8 @@ function renderDeductItems() {
           placeholder="ราคา/หน่วย"
           onchange="deductRows[${i}].pricePerUnit=parseFloat(this.value)||0">
       </td>
-      <td class="text-muted">${r.unit}</td>
-      <td>
+      <td data-label="หน่วย" class="text-muted">${r.unit}</td>
+      <td data-label="">
         <button class="btn btn-sm btn-outline-danger"
           onclick="deductRows.splice(${i},1);renderDeductItems()">
           <i class="bi bi-trash"></i>
