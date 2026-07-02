@@ -839,4 +839,24 @@ body {
     padding-bottom: 80px; /* Extra spacing inside content */
   }
 }
+
+/* ── SCROLLABLE TABLE WITH STICKY HEADERS ── */
+.scrollable-table-container {
+  max-height: 450px;
+  overflow-y: auto;
+  position: relative;
+}
+.scrollable-table-container thead th {
+  position: sticky;
+  top: 0;
+  background-color: var(--claude-surface) !important;
+  z-index: 10;
+  box-shadow: inset 0 -1px 0 var(--claude-border);
+}
+
+@media (max-width: 768px) {
+  .scrollable-table-container {
+    max-height: 350px;
+  }
+}
 </style>
