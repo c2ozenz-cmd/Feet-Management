@@ -31,6 +31,12 @@
 
 * { box-sizing: border-box; }
 
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: 'Sarabun', 'IBM Plex Sans Thai', sans-serif;
   background: var(--claude-bg);
@@ -38,6 +44,8 @@ body {
   font-size: 15px;
   line-height: 1.6;
   min-height: 100vh;
+  touch-action: manipulation;
+  overscroll-behavior: contain;
 }
 
 /* ── LOGIN ── */
@@ -338,7 +346,7 @@ body {
   background: var(--claude-bg);
   border-radius: var(--radius-sm);
   font-family: 'Sarabun', sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--claude-text);
 }
 .form-control:focus, .form-select:focus {
