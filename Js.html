@@ -1938,9 +1938,12 @@ function loadStock() {
 }
 
 function showStockList() {
-  document.getElementById('stockListView').classList.remove('d-none');
-  document.getElementById('stockFormView').classList.add('d-none');
-  document.getElementById('stockDeductView').classList.add('d-none');
+  const list = document.getElementById('stockListView');
+  const form = document.getElementById('stockFormView');
+  const deduct = document.getElementById('stockDeductView');
+  if (list) list.classList.remove('d-none');
+  if (form) form.classList.add('d-none');
+  if (deduct) deduct.classList.add('d-none');
 }
 
 function updateStockStats(stock) {
@@ -1948,14 +1951,21 @@ function updateStockStats(stock) {
   const inStock = stock.filter(s => parseFloat(s.qty) > parseFloat(s.minQty || 0)).length;
   const low = stock.filter(s => parseFloat(s.qty) > 0 && parseFloat(s.qty) <= parseFloat(s.minQty || 0)).length;
   const out = stock.filter(s => parseFloat(s.qty) <= 0).length;
-  document.getElementById('stockTotalItems').textContent = total;
-  document.getElementById('stockInStock').textContent = inStock;
-  document.getElementById('stockLow').textContent = low;
-  document.getElementById('stockOut').textContent = out;
+  
+  const totalEl = document.getElementById('stockTotalItems');
+  const inStockEl = document.getElementById('stockInStock');
+  const lowEl = document.getElementById('stockLow');
+  const outEl = document.getElementById('stockOut');
+  
+  if (totalEl) totalEl.textContent = total;
+  if (inStockEl) inStockEl.textContent = inStock;
+  if (lowEl) lowEl.textContent = low;
+  if (outEl) outEl.textContent = out;
 }
 
 function renderStockTable(stock) {
   const tbody = document.getElementById('stockTableBody');
+  if (!tbody) return;
   if (!stock.length) {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="bi bi-boxes"></i>ยังไม่มีรายการอะไหล่</div></td></tr>`;
     return;
@@ -1995,8 +2005,11 @@ function renderStockTable(stock) {
 }
 
 function filterStock() {
-  const q = document.getElementById('stockSearch').value.toLowerCase();
-  const f = document.getElementById('stockStatusFilter').value;
+  const searchEl = document.getElementById('stockSearch');
+  const filterEl = document.getElementById('stockStatusFilter');
+  if (!searchEl || !filterEl) return;
+  const q = searchEl.value.toLowerCase();
+  const f = filterEl.value;
   renderStockTable(allStock.filter(s => {
     const qOk = !q || s.partName.toLowerCase().includes(q) || (s.partCode || '').toLowerCase().includes(q);
     const qty = parseFloat(s.qty) || 0, minQty = parseFloat(s.minQty) || 0;
@@ -2009,60 +2022,87 @@ function filterStock() {
 }
 
 function showStockForm(id = null) {
-  document.getElementById('stockListView').classList.add('d-none');
-  document.getElementById('stockFormView').classList.remove('d-none');
-  document.getElementById('stockDeductView').classList.add('d-none');
+  const list = document.getElementById('stockListView');
+  const form = document.getElementById('stockFormView');
+  const deduct = document.getElementById('stockDeductView');
+  if (list) list.classList.add('d-none');
+  if (form) form.classList.remove('d-none');
+  if (deduct) deduct.classList.add('d-none');
 
-  document.getElementById('stockItemId').value = '';
-  document.getElementById('stockPartCode').value = '';
-  document.getElementById('stockPartCode').placeholder = 'กำลังโหลดรหัส...';
-  document.getElementById('stockPartName').value = '';
-  document.getElementById('stockUnit').value = 'ชิ้น';
-  document.getElementById('stockQty').value = 0;
-  document.getElementById('stockMinQty').value = 0;
-  document.getElementById('stockLocation').value = '';
-  document.getElementById('stockNote').value = '';
+  const itemId = document.getElementById('stockItemId');
+  const partCode = document.getElementById('stockPartCode');
+  const partName = document.getElementById('stockPartName');
+  const unit = document.getElementById('stockUnit');
+  const qty = document.getElementById('stockQty');
+  const minQty = document.getElementById('stockMinQty');
+  const location = document.getElementById('stockLocation');
+  const note = document.getElementById('stockNote');
+
+  if (itemId) itemId.value = '';
+  if (partCode) { partCode.value = ''; partCode.placeholder = 'กำลังโหลดรหัส...'; }
+  if (partName) partName.value = '';
+  if (unit) unit.value = 'ชิ้น';
+  if (qty) qty.value = 0;
+  if (minQty) minQty.value = 0;
+  if (location) location.value = '';
+  if (note) note.value = '';
+
+  const formTitle = document.getElementById('stockFormTitle');
+  const breadcrumb = document.getElementById('stockFormBreadcrumb');
 
   if (id) {
-    document.getElementById('stockFormTitle').textContent = 'แก้ไขอะไหล่';
+    if (formTitle) formTitle.textContent = 'แก้ไขอะไหล่';
     const s = allStock.find(x => x.id === id);
     if (s) {
-      document.getElementById('stockFormBreadcrumb').textContent = s.partCode || s.partName || 'แก้ไข';
-      document.getElementById('stockItemId').value = s.id;
-      document.getElementById('stockPartCode').value = s.partCode || '';
-      document.getElementById('stockPartCode').placeholder = 'รหัสอะไหล่';
-      document.getElementById('stockPartName').value = s.partName;
-      document.getElementById('stockUnit').value = s.unit || '';
-      document.getElementById('stockQty').value = s.qty || 0;
-      document.getElementById('stockMinQty').value = s.minQty || 0;
-      document.getElementById('stockLocation').value = s.location || '';
-      document.getElementById('stockNote').value = s.note || '';
+      if (breadcrumb) breadcrumb.textContent = s.partCode || s.partName || 'แก้ไข';
+      if (itemId) itemId.value = s.id;
+      if (partCode) {
+        partCode.value = s.partCode || '';
+        partCode.placeholder = 'รหัสอะไหล่';
+      }
+      if (partName) partName.value = s.partName;
+      if (unit) unit.value = s.unit || '';
+      if (qty) qty.value = s.qty || 0;
+      if (minQty) minQty.value = s.minQty || 0;
+      if (location) location.value = s.location || '';
+      if (note) note.value = s.note || '';
     }
   } else {
-    document.getElementById('stockFormTitle').textContent = 'เพิ่มอะไหล่ใหม่';
-    document.getElementById('stockFormBreadcrumb').textContent = 'ใหม่';
+    if (formTitle) formTitle.textContent = 'เพิ่มอะไหล่ใหม่';
+    if (breadcrumb) breadcrumb.textContent = 'ใหม่';
     // เพิ่มใหม่ — ดึงรหัสล่วงหน้า
     google.script.run
       .withSuccessHandler(code => {
-        document.getElementById('stockPartCode').placeholder = code + ' (อัตโนมัติ)';
+        const pc = document.getElementById('stockPartCode');
+        if (pc) pc.placeholder = code + ' (อัตโนมัติ)';
       })
       .withFailureHandler(() => {
-        document.getElementById('stockPartCode').placeholder = 'กรอกรหัส หรือปล่อยว่างให้ระบบสร้าง';
+        const pc = document.getElementById('stockPartCode');
+        if (pc) pc.placeholder = 'กรอกรหัส หรือปล่อยว่างให้ระบบสร้าง';
       })
       .generatePartCode();
   }
 }
 
 function saveStockItem() {
+  const itemId = document.getElementById('stockItemId');
+  const partCode = document.getElementById('stockPartCode');
+  const partName = document.getElementById('stockPartName');
+  const unit = document.getElementById('stockUnit');
+  const qty = document.getElementById('stockQty');
+  const minQty = document.getElementById('stockMinQty');
+  const location = document.getElementById('stockLocation');
+  const note = document.getElementById('stockNote');
+
   const item = {
-    id: document.getElementById('stockItemId').value,
-    partCode: document.getElementById('stockPartCode').value,
-    partName: document.getElementById('stockPartName').value,
-    unit: document.getElementById('stockUnit').value,
-    qty: parseFloat(document.getElementById('stockQty').value) || 0,
-    minQty: parseFloat(document.getElementById('stockMinQty').value) || 0,
-    location: document.getElementById('stockLocation').value,
-    note: document.getElementById('stockNote').value
+    id: itemId ? itemId.value : '',
+    partCode: partCode ? partCode.value : '',
+    partName: partName ? partName.value : '',
+    unit: unit ? unit.value : '',
+    qty: qty ? (parseFloat(qty.value) || 0) : 0,
+    minQty: minQty ? (parseFloat(minQty.value) || 0) : 0,
+    location: location ? location.value : '',
+    note: note ? note.value : ''
   };
   if (!item.partName) { showToast('warning', 'กรุณากรอกชื่ออะไหล่'); return; }
   showLoading('กำลังบันทึก...');
@@ -2094,15 +2134,23 @@ function deleteStockItem(id) {
 // ── MANUAL DEDUCT STOCK ──
 
 function showDeductForm() {
-  document.getElementById('stockListView').classList.add('d-none');
-  document.getElementById('stockFormView').classList.add('d-none');
-  document.getElementById('stockDeductView').classList.remove('d-none');
+  const list = document.getElementById('stockListView');
+  const form = document.getElementById('stockFormView');
+  const deduct = document.getElementById('stockDeductView');
+  if (list) list.classList.add('d-none');
+  if (form) form.classList.add('d-none');
+  if (deduct) deduct.classList.remove('d-none');
 
   deductRows = [];
-  document.getElementById('deductDate').value  = todayISO();
-  document.getElementById('deductPlate').value = '';
-  document.getElementById('deductNote').value  = '';
-  document.getElementById('deductSummary').classList.add('d-none');
+  const dDate = document.getElementById('deductDate');
+  const dPlate = document.getElementById('deductPlate');
+  const dNote = document.getElementById('deductNote');
+  const dSummary = document.getElementById('deductSummary');
+
+  if (dDate) dDate.value  = todayISO();
+  if (dPlate) dPlate.value = '';
+  if (dNote) dNote.value  = '';
+  if (dSummary) dSummary.classList.add('d-none');
   renderDeductItems();
 }
 
@@ -2207,9 +2255,13 @@ function renderDeductItems() {
 }
 
 function confirmDeductStock() {
-  const date  = document.getElementById('deductDate').value;
-  const plate = document.getElementById('deductPlate').value.trim();
-  const note  = document.getElementById('deductNote').value.trim();
+  const dDate = document.getElementById('deductDate');
+  const dPlate = document.getElementById('deductPlate');
+  const dNote = document.getElementById('deductNote');
+
+  const date  = dDate ? dDate.value : '';
+  const plate = dPlate ? dPlate.value.trim() : '';
+  const note  = dNote ? dNote.value.trim() : '';
 
   if (!date)           { showToast('warning', 'กรุณาเลือกวันที่');      return; }
   if (!plate)          { showToast('warning', 'กรุณาระบุทะเบียนรถ');   return; }
@@ -2247,12 +2299,14 @@ function confirmDeductStock() {
 
         // แสดงสรุป
         const summaryEl = document.getElementById('deductSummary');
-        document.getElementById('deductSummaryList').innerHTML =
-          res.results.map(r => r.error
+        const summaryListEl = document.getElementById('deductSummaryList');
+        if (summaryListEl) {
+          summaryListEl.innerHTML = res.results.map(r => r.error
             ? `<div class="text-danger">❌ ${r.partName}: ${r.error}</div>`
             : `<div>✅ ${r.partName}: ${r.before} → <b>${r.after}</b></div>`
           ).join('');
-        summaryEl.classList.remove('d-none');
+        }
+        if (summaryEl) summaryEl.classList.remove('d-none');
 
         showToast('success', `ตัดอะไหล่ ${deductRows.length} รายการเรียบร้อย`);
         deductRows = [];
