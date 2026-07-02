@@ -119,6 +119,7 @@ function logout() {
 
 // ── NAVIGATION ──
 function navigateTo(page) {
+  if (typeof toggleQuickActions === 'function') toggleQuickActions(true);
   document.querySelectorAll('[id^=page-]').forEach(el => el.classList.add('d-none'));
   document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
   const pageEl = document.getElementById(`page-${page}`);
@@ -163,6 +164,36 @@ function closeSidebar() {
   document.getElementById('sidebarOverlay').classList.remove('show');
 }
 
+function toggleQuickActions(forceClose = false) {
+  const wrap = document.getElementById('mobileQuickActions');
+  if (!wrap) return;
+  wrap.classList.toggle('open', !forceClose && !wrap.classList.contains('open'));
+}
+
+function quickNewRepair() {
+  toggleQuickActions(true);
+  navigateTo('repairs');
+  setTimeout(() => showRepairForm(), 0);
+}
+
+function quickNewPO() {
+  toggleQuickActions(true);
+  navigateTo('po');
+  setTimeout(() => showPOForm(), 0);
+}
+
+function quickDeductStock() {
+  toggleQuickActions(true);
+  navigateTo('stock');
+  setTimeout(() => showDeductForm(), 0);
+}
+
+function quickOpenSummaryMonth() {
+  toggleQuickActions(true);
+  navigateTo('summary');
+  setTimeout(() => setQuickFilter('month'), 0);
+}
+
 // ── UTILITIES ──
 function formatDate(d) {
   if (!d) return '—';
@@ -170,6 +201,10 @@ function formatDate(d) {
   catch { return d; }
 }
 function todayISO() { return new Date().toISOString().split('T')[0]; }
+function currentMonthISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 function fmtNum(n) { return parseFloat(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 function statusBadge(status) {
@@ -243,23 +278,24 @@ function loadDashboard() {
 
     // แสดงเฉพาะงานที่ยังไม่เสร็จ เรียงวันที่ใหม่สุดก่อน
     const tbody = document.getElementById('dashRecentRepairs');
+    tbody.closest('table').classList.add('table-card-mobile');
     tbody.innerHTML = pending.length
       ? pending
           .sort((a,b) => new Date(b.date) - new Date(a.date))
           .slice(0, 8)
           .map(r => `
             <tr>
-              <td>
+              <td data-label="เลขที่">
                 <a href="#" onclick="editRepair('${r.repairNo}')"
                   class="text-decoration-none fw-semibold">
                   ${r.repairNo}
                 </a>
               </td>
-              <td>${r.plate}</td>
-              <td>${statusBadge(r.status)}</td>
-              <td>${formatDate(r.date)}</td>
+              <td data-label="ทะเบียน">${r.plate}</td>
+              <td data-label="สถานะ">${statusBadge(r.status)}</td>
+              <td data-label="วันที่">${formatDate(r.date)}</td>
             </tr>`).join('')
-      : `<tr><td colspan="4" class="text-center text-muted py-4">
+      : `<tr><td colspan="4" data-label="" class="text-center text-muted py-4">
            <i class="bi bi-check-circle text-success d-block mb-1 fs-5"></i>
            ไม่มีงานค้าง
          </td></tr>`;
@@ -550,6 +586,9 @@ function _doLoadSummary(showLoad = false) {
 
 function renderSummary(data) {
   const grandTotal = data.total;
+  ['sumByPlateBody', 'sumByShopBody', 'sumDetailBody'].forEach(id => {
+    document.getElementById(id)?.closest('table')?.classList.add('table-card-mobile');
+  });
 
   // Stat cards
   document.getElementById('sumTotal').textContent = fmtNum(grandTotal);
@@ -564,10 +603,10 @@ function renderSummary(data) {
     ? data.byPlate.map(r => {
         const pct = grandTotal > 0 ? (r.total / grandTotal * 100).toFixed(1) : 0;
         return `<tr>
-          <td class="fw-semibold">${r.plate}</td>
-          <td class="text-end">${fmtNum(r.total)}</td>
-          <td style="min-width:100px">
-            <div class="d-flex align-items-center gap-2">
+          <td data-label="ทะเบียน" class="fw-semibold">${r.plate}</td>
+          <td data-label="ยอดรวม" class="text-end fw-semibold">${fmtNum(r.total)}</td>
+          <td data-label="สัดส่วน" style="min-width:100px">
+            <div class="summary-share d-flex align-items-center gap-2">
               <div style="flex:1;height:6px;background:var(--claude-border);border-radius:3px">
                 <div style="width:${pct}%;height:100%;background:var(--claude-primary);border-radius:3px"></div>
               </div>
@@ -576,17 +615,17 @@ function renderSummary(data) {
           </td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="3" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+    : '<tr><td colspan="3" data-label="" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
 
   // แยกตามร้านค้า
   document.getElementById('sumByShopBody').innerHTML = data.byShop.length
     ? data.byShop.map(r => {
         const pct = grandTotal > 0 ? (r.total / grandTotal * 100).toFixed(1) : 0;
         return `<tr>
-          <td class="fw-semibold">${r.shop}</td>
-          <td class="text-end">${fmtNum(r.total)}</td>
-          <td style="min-width:100px">
-            <div class="d-flex align-items-center gap-2">
+          <td data-label="ร้านค้า" class="fw-semibold">${r.shop}</td>
+          <td data-label="ยอดรวม" class="text-end fw-semibold">${fmtNum(r.total)}</td>
+          <td data-label="สัดส่วน" style="min-width:100px">
+            <div class="summary-share d-flex align-items-center gap-2">
               <div style="flex:1;height:6px;background:var(--claude-border);border-radius:3px">
                 <div style="width:${pct}%;height:100%;background:var(--claude-warning);border-radius:3px"></div>
               </div>
@@ -595,24 +634,24 @@ function renderSummary(data) {
           </td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="3" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+    : '<tr><td colspan="3" data-label="" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
 
   // รายละเอียด
   document.getElementById('sumDetailBody').innerHTML = data.detail.length
     ? data.detail.map(p => `
         <tr>
-          <td>
+          <td data-label="เลขที่ PO">
             <a href="#" onclick="editPO('${p.poNo}')" class="fw-semibold text-decoration-none">
               ${p.poNo}
             </a>
           </td>
-          <td>${formatDate(p.issueDate)}</td>
-          <td>${p.plate}</td>
-          <td>${p.shopName}</td>
-          <td class="text-muted">${p.refRepairNo || '—'}</td>
-          <td class="text-end fw-semibold">${fmtNum(p.total)}</td>
+          <td data-label="วันที่">${formatDate(p.issueDate)}</td>
+          <td data-label="ทะเบียน">${p.plate}</td>
+          <td data-label="ร้านค้า">${p.shopName}</td>
+          <td data-label="อ้างอิงซ่อม" class="text-muted">${p.refRepairNo || '—'}</td>
+          <td data-label="ยอดรวม" class="text-end fw-semibold">${fmtNum(p.total)}</td>
         </tr>`).join('')
-    : '<tr><td colspan="6" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+    : '<tr><td colspan="6" data-label="" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
 }
 
 function setQuickFilter(period) {
@@ -687,6 +726,23 @@ function filterRepairs() {
     (!s || r.status === s) &&
     (!m || r.date.startsWith(m))
   ));
+}
+
+function applyRepairPreset(kind) {
+  const search = document.getElementById('repairSearch');
+  const status = document.getElementById('repairStatusFilter');
+  const month = document.getElementById('repairMonthFilter');
+  if (!search || !status || !month) return;
+  if (kind === 'clear') {
+    search.value = '';
+    status.value = '';
+    month.value = '';
+  } else {
+    if (kind === 'month') month.value = currentMonthISO();
+    if (kind === 'waiting') status.value = 'รอดำเนินการ';
+    if (kind === 'parts') status.value = 'รออะไหล่';
+  }
+  filterRepairs();
 }
 
 function showRepairList() {
@@ -787,8 +843,9 @@ function removeRepairPart(idx) {
 
 function renderRepairParts() {
   const tbody = document.getElementById('repairPartsBody');
+  tbody.closest('table').classList.add('table-card-mobile');
   if (!repairPartRows.length) {
-    tbody.innerHTML = '<tr id="repairPartsEmpty"><td colspan="5" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td></tr>';
+    tbody.innerHTML = '<tr id="repairPartsEmpty"><td colspan="5" data-label="" class="text-center text-muted py-3">ยังไม่มีรายการอะไหล่</td></tr>';
     return;
   }
 
@@ -798,16 +855,16 @@ function renderRepairParts() {
 
   tbody.innerHTML = repairPartRows.map((p, i) => `
     <tr>
-      <td class="text-muted">${i + 1}</td>
-      <td>
+      <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
+      <td data-label="อะไหล่">
         <div class="input-group input-group-sm">
           <input type="text" class="form-control" value="${p.partName || ''}" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
           <button class="btn btn-outline-secondary" ${isCompleted ? 'disabled' : ''} onclick="openPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
         </div>
       </td>
-      <td><span class="text-muted small">${p.partCode || ''}</span></td>
-      <td><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
-      <td>
+      <td data-label="รหัส"><span class="text-muted small">${p.partCode || ''}</span></td>
+      <td data-label="จำนวน"><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
+      <td data-label="">
         ${isCompleted ? '—' : `
         <button class="btn btn-sm btn-outline-danger" onclick="removeRepairPart(${i})"><i class="bi bi-trash"></i></button>
         `}
@@ -1071,6 +1128,23 @@ function filterPOs() {
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
   ));
+}
+
+function applyPOPreset(kind) {
+  const search = document.getElementById('poSearch');
+  const status = document.getElementById('poStatusFilter');
+  const month = document.getElementById('poMonthFilter');
+  if (!search || !status || !month) return;
+  if (kind === 'clear') {
+    search.value = '';
+    status.value = '';
+    month.value = '';
+  } else {
+    if (kind === 'month') month.value = currentMonthISO();
+    if (kind === 'pending') status.value = 'รออนุมัติ';
+    if (kind === 'received') status.value = 'รับของแล้ว';
+  }
+  filterPOs();
 }
 
 function showPOList() {
@@ -2020,6 +2094,15 @@ function filterStock() {
       (f === 'ok' && qty > minQty);
     return qOk && sOk;
   }));
+}
+
+function applyStockPreset(kind) {
+  const search = document.getElementById('stockSearch');
+  const status = document.getElementById('stockStatusFilter');
+  if (!search || !status) return;
+  search.value = '';
+  status.value = kind === 'clear' ? '' : kind;
+  filterStock();
 }
 
 function showStockForm(id = null) {
@@ -4128,8 +4211,9 @@ function loadLineLog() {
 
 function renderLineLogTable(logs) {
   const tbody = document.getElementById('lineLogTableBody');
+  tbody.closest('table').classList.add('table-card-mobile');
   if (!logs.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">ไม่มีประวัติ Log การส่ง LINE</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" data-label="" class="text-center text-muted py-4">ไม่มีประวัติ Log การส่ง LINE</td></tr>';
     return;
   }
   

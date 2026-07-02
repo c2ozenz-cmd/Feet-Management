@@ -677,6 +677,7 @@ body {
   .table-card-mobile tbody {
     display: block !important;
     width: 100% !important;
+    max-width: 100% !important;
   }
   .table-card-mobile tbody tr {
     display: block !important;
@@ -694,6 +695,7 @@ body {
   .table-card-mobile tbody td {
     display: flex !important;
     width: 100% !important;
+    max-width: 100% !important;
     box-sizing: border-box !important;
     flex-direction: column;
     align-items: flex-start;
@@ -703,6 +705,9 @@ body {
     font-size: 13px;
     gap: 4px;
     min-height: 36px;
+    overflow: visible !important;
+    white-space: normal !important;
+    text-overflow: clip !important;
   }
 
   .table-card-mobile tbody td::before {
@@ -752,7 +757,82 @@ body {
   .card-header .d-flex.gap-2 { width: 100%; }
   .card-header select.form-select { width: 100% !important; max-width: 100% !important; }
 
+  #page-summary .card-body { padding: 14px; }
+  #page-summary .btn-sm { min-height: 38px; }
+  #page-summary .d-flex.gap-2.mt-2 { gap: 6px !important; }
+  #page-summary .d-flex.gap-2.mt-2 .text-muted {
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  #page-summary .d-flex.gap-2.mt-2 .btn {
+    flex: 1 1 calc(33.333% - 6px);
+    min-height: 36px;
+  }
+  #page-summary .summary-share { width: 100%; }
+  .table-card-mobile tbody td[data-label="ยอดรวม"] {
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+
   /* ── Modal ── */
+  .mobile-filter-chips {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+    margin-top: -6px;
+  }
+  .filter-chip {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  #repairFormView,
+  #poFormView,
+  #stockFormView,
+  #stockDeductView {
+    counter-reset: formStep;
+  }
+  #repairFormView > .card > .card-header::before,
+  #poFormView > .card > .card-header::before,
+  #stockFormView > .card > .card-header::before,
+  #stockDeductView > .card > .card-header::before {
+    counter-increment: formStep;
+    content: counter(formStep);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--claude-primary);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  #repairFormView > .d-flex.justify-content-end,
+  #poFormView > .d-flex.justify-content-end,
+  #stockFormView > .d-flex.justify-content-end,
+  #stockDeductView > .d-flex.justify-content-end {
+    position: sticky;
+    bottom: 72px;
+    z-index: 120;
+    background: rgba(253,250,244,0.96);
+    border: 1px solid var(--claude-border);
+    border-radius: var(--radius);
+    box-shadow: var(--claude-shadow-lg);
+    padding: 10px;
+    flex-wrap: wrap;
+  }
+  #repairFormView > .d-flex.justify-content-end .btn,
+  #poFormView > .d-flex.justify-content-end .btn,
+  #stockFormView > .d-flex.justify-content-end .btn,
+  #stockDeductView > .d-flex.justify-content-end .btn {
+    flex: 1 1 140px;
+    min-height: 42px;
+  }
+
   .modal-dialog { margin: 8px; }
   .modal-xl { max-width: calc(100vw - 16px); }
 
@@ -832,9 +912,124 @@ body {
   color: var(--claude-primary);
 }
 
+.mobile-quick-actions {
+  display: none;
+}
+
+.mobile-filter-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: -4px 0 16px;
+}
+
+.filter-chip {
+  border: 1px solid var(--claude-border);
+  background: var(--claude-surface);
+  color: var(--claude-secondary);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+}
+
+.mobile-task-hub {
+  display: none;
+}
+
+.task-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.task-hub-btn {
+  border: 1px solid var(--claude-border);
+  background: var(--claude-bg);
+  color: var(--claude-secondary);
+  border-radius: var(--radius-sm);
+  min-height: 72px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.task-hub-btn i {
+  font-size: 20px;
+  color: var(--claude-primary);
+}
+
 @media (max-width: 992px) {
   .mobile-bottom-nav {
     display: flex;
+  }
+  .mobile-task-hub {
+    display: block;
+  }
+  .mobile-quick-actions {
+    display: block;
+  }
+  .quick-action-toggle {
+    position: fixed;
+    right: 16px;
+    bottom: 76px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--claude-primary);
+    color: #fff;
+    box-shadow: var(--claude-shadow-lg);
+    z-index: 1020;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    transition: var(--transition);
+  }
+  .mobile-quick-actions.open .quick-action-toggle {
+    transform: rotate(45deg);
+    background: var(--claude-secondary);
+  }
+  .quick-action-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 136px;
+    z-index: 1020;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    width: min(220px, calc(100vw - 32px));
+  }
+  .mobile-quick-actions.open .quick-action-panel {
+    display: flex;
+  }
+  .quick-action-btn {
+    border: 1px solid var(--claude-border);
+    border-radius: var(--radius-sm);
+    background: var(--claude-surface);
+    color: var(--claude-secondary);
+    box-shadow: var(--claude-shadow);
+    min-height: 44px;
+    padding: 9px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    text-align: left;
+  }
+  .quick-action-btn i {
+    color: var(--claude-primary);
+    font-size: 18px;
   }
   .app-wrapper {
     padding-bottom: 60px; /* Space for bottom nav */

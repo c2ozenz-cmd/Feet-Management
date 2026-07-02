@@ -7,6 +7,33 @@
 </div>
 
 <!-- Stat Cards — เน้น actionable -->
+<div class="mobile-task-hub card mb-3">
+  <div class="card-header">
+    <div class="card-icon"><i class="bi bi-lightning-charge"></i></div>
+    งานที่ใช้บ่อย
+  </div>
+  <div class="card-body">
+    <div class="task-hub-grid">
+      <button class="task-hub-btn" onclick="quickNewRepair()">
+        <i class="bi bi-tools"></i>
+        <span>แจ้งซ่อมใหม่</span>
+      </button>
+      <button class="task-hub-btn admin-only" onclick="quickNewPO()">
+        <i class="bi bi-file-earmark-plus"></i>
+        <span>สร้าง PO</span>
+      </button>
+      <button class="task-hub-btn" onclick="quickDeductStock()">
+        <i class="bi bi-scissors"></i>
+        <span>ตัด Stock</span>
+      </button>
+      <button class="task-hub-btn" onclick="quickOpenSummaryMonth()">
+        <i class="bi bi-calendar-month"></i>
+        <span>สรุปเดือนนี้</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="row g-3 mb-4">
   <div class="col-6 col-xl-3">
     <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
