@@ -75,6 +75,30 @@
       <div id="page-oiltemplate" class="d-none"><?!= include('page_oiltemplate'); ?></div>
     </main>
   </div>
+  
+  <!-- BOTTOM NAVIGATION FOR MOBILE -->
+  <div class="mobile-bottom-nav">
+    <a class="nav-item" data-page="dashboard" onclick="navigateTo('dashboard')">
+      <i class="bi bi-speedometer2"></i>
+      <span>แดชบอร์ด</span>
+    </a>
+    <a class="nav-item" data-page="repairs" onclick="navigateTo('repairs')">
+      <i class="bi bi-tools"></i>
+      <span>แจ้งซ่อม</span>
+    </a>
+    <a class="nav-item" data-page="po" onclick="navigateTo('po')">
+      <i class="bi bi-file-earmark-text"></i>
+      <span>ใบสั่งซื้อ</span>
+    </a>
+    <a class="nav-item" data-page="stock" onclick="navigateTo('stock')">
+      <i class="bi bi-boxes"></i>
+      <span>Stock</span>
+    </a>
+    <a class="nav-item" id="mobileMenuBtn">
+      <i class="bi bi-list"></i>
+      <span>เมนู</span>
+    </a>
+  </div>
 </div>
 
 <!-- Bootstrap JS -->

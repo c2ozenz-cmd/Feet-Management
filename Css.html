@@ -783,4 +783,60 @@ body {
   .step-item:not(:last-child)::after { top: 14px; }
   .login-card { padding: 32px 24px; }
 }
+
+/* ── MOBILE BOTTOM NAV ── */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: var(--claude-surface);
+  border-top: 1px solid var(--claude-border);
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  z-index: 1010;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.mobile-bottom-nav .nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--claude-text-muted);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 500;
+  width: 20%;
+  height: 100%;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.mobile-bottom-nav .nav-item i {
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+
+.mobile-bottom-nav .nav-item:hover {
+  color: var(--claude-secondary);
+}
+
+.mobile-bottom-nav .nav-item.active {
+  color: var(--claude-primary);
+}
+
+@media (max-width: 992px) {
+  .mobile-bottom-nav {
+    display: flex;
+  }
+  .app-wrapper {
+    padding-bottom: 60px; /* Space for bottom nav */
+  }
+  .main-content {
+    padding-bottom: 80px; /* Extra spacing inside content */
+  }
+}
 </style>
