@@ -7,6 +7,8 @@
 let currentUser = null;
 let allRepairs = [];
 let allPOs = [];
+let currentPOList = [];
+let selectedPONos = new Set();
 let allStock = [];
 let allBuses = [];
 let deductRows = [];
@@ -1088,14 +1090,22 @@ function poStatusSelectHtml(poNo, currentStatus) {
 function renderPOTable(pos) {
   const tbody = document.getElementById('poTableBody');
   tbody.closest('table').classList.add('table-card-mobile');
+  currentPOList = [...pos].sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
   if (!pos.length) {
-    tbody.innerHTML = `<tr><td colspan="8" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
+    syncPOBulkActions();
     return;
   }
   
-  pos = [...pos].sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
-  tbody.innerHTML = pos.map(p => `
+  tbody.innerHTML = currentPOList.map(p => {
+    const checked = selectedPONos.has(p.poNo) ? 'checked' : '';
+    const canSelect = currentUser?.role === 'admin';
+    return `
     <tr>
+      <td data-label="Select" class="admin-only text-center">
+        <input type="checkbox" class="form-check-input po-row-check" value="${p.poNo}" ${checked}
+          ${canSelect ? '' : 'disabled'} onchange="togglePOSelection('${p.poNo}', this.checked)">
+      </td>
       <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span></td>
       <td data-label="ร้านค้า">${p.shopName}</td>
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
@@ -1116,7 +1126,9 @@ function renderPOTable(pos) {
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  syncPOBulkActions();
 }
 
 function filterPOs() {
@@ -1128,6 +1140,109 @@ function filterPOs() {
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
   ));
+}
+
+function togglePOSelection(poNo, checked) {
+  checked ? selectedPONos.add(poNo) : selectedPONos.delete(poNo);
+  syncPOBulkActions();
+}
+
+function toggleSelectAllPOs(checkbox) {
+  currentPOList.forEach(p => {
+    checkbox.checked ? selectedPONos.add(p.poNo) : selectedPONos.delete(p.poNo);
+  });
+  document.querySelectorAll('.po-row-check').forEach(input => {
+    input.checked = checkbox.checked;
+  });
+  syncPOBulkActions();
+}
+
+function clearPOSelection() {
+  selectedPONos.clear();
+  document.querySelectorAll('.po-row-check').forEach(input => { input.checked = false; });
+  syncPOBulkActions();
+}
+
+function syncPOBulkActions() {
+  const countEl = document.getElementById('poSelectedCount');
+  const sendBtn = document.getElementById('poBulkSendLineBtn');
+  const selectAll = document.getElementById('poSelectAll');
+  const visibleNos = currentPOList.map(p => p.poNo);
+  const selectedVisibleCount = visibleNos.filter(poNo => selectedPONos.has(poNo)).length;
+  const totalSelected = selectedPONos.size;
+
+  if (countEl) countEl.textContent = `เลือก ${totalSelected} รายการ`;
+  if (sendBtn) sendBtn.disabled = totalSelected === 0;
+  if (selectAll) {
+    selectAll.checked = visibleNos.length > 0 && selectedVisibleCount === visibleNos.length;
+    selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleNos.length;
+  }
+}
+
+function sendSelectedPOsToLine() {
+  const orderedNos = currentPOList
+    .map(p => p.poNo)
+    .filter(poNo => selectedPONos.has(poNo));
+  selectedPONos.forEach(poNo => {
+    if (!orderedNos.includes(poNo)) orderedNos.push(poNo);
+  });
+
+  if (!orderedNos.length) {
+    showToast('warning', 'กรุณาเลือก PO ก่อน');
+    return;
+  }
+
+  Swal.fire({
+    title: 'ส่ง Line รายการที่เลือก?',
+    text: `ระบบจะส่ง Push ขออนุมัติ PO จำนวน ${orderedNos.length} ใบทีละรายการ`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'ส่ง Line',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#06C755',
+    cancelButtonColor: '#6B7280'
+  }).then(r => {
+    if (!r.isConfirmed) return;
+
+    showLoading(`กำลังส่ง Line 0/${orderedNos.length}...`);
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (!res || !res.success) {
+          showToast('error', res?.message || 'ส่ง Line ไม่สำเร็จ');
+          return;
+        }
+
+        clearPOSelection();
+        loadPOs();
+
+        const sent = Number(res.sent || 0);
+        const skipped = Number(res.skipped || 0);
+        const failed = Number(res.failed || 0);
+        const details = (res.results || [])
+          .filter(x => !x.success)
+          .slice(0, 6)
+          .map(x => `<div><b>${x.poNo}</b>: ${x.message || 'ไม่สำเร็จ'}</div>`)
+          .join('');
+
+        Swal.fire({
+          icon: failed ? 'warning' : 'success',
+          title: failed ? 'ส่งบางรายการไม่สำเร็จ' : 'ส่ง Line เรียบร้อย',
+          html: `<div class="text-start">
+                   <div>ส่งสำเร็จ: <b>${sent}</b></div>
+                   <div>ข้าม/เคยส่งแล้ว: <b>${skipped}</b></div>
+                   <div>ไม่สำเร็จ: <b>${failed}</b></div>
+                   ${details ? `<hr>${details}` : ''}
+                 </div>`,
+          confirmButtonColor: '#3B82F6'
+        });
+      })
+      .withFailureHandler(err => {
+        Swal.close();
+        showToast('error', err.message);
+      })
+      .sendPOsToLineQueue(orderedNos);
+  });
 }
 
 function applyPOPreset(kind) {
@@ -4211,10 +4326,10 @@ function loadLineLog() {
 }
 
 function loadLineQuotaStatus() {
-  const usedEls = ['lineQuotaUsed', 'lineQuotaUsedGrid']
+  const usedEls = ['lineQuotaUsed']
     .map(id => document.getElementById(id))
     .filter(Boolean);
-  const detailEls = ['lineQuotaDetail', 'lineQuotaDetailGrid']
+  const detailEls = ['lineQuotaDetail']
     .map(id => document.getElementById(id))
     .filter(Boolean);
   if (!usedEls.length || !detailEls.length) return;

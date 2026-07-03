@@ -28,12 +28,27 @@
     <button class="filter-chip" onclick="applyPOPreset('clear')"><i class="bi bi-x-lg"></i>ล้าง</button>
   </div>
 
+  <div class="po-bulk-actions admin-only">
+    <label class="po-select-all">
+      <input type="checkbox" id="poSelectAll" onchange="toggleSelectAllPOs(this)">
+      <span>Select</span>
+    </label>
+    <span id="poSelectedCount" class="text-muted small">เลือก 0 รายการ</span>
+    <button class="btn btn-sm" id="poBulkSendLineBtn" onclick="sendSelectedPOsToLine()" disabled>
+      <i class="bi bi-line me-1"></i>ส่ง Line
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="clearPOSelection()">
+      <i class="bi bi-x-lg me-1"></i>ล้าง
+    </button>
+  </div>
+
   <div class="card">
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-hover mb-0">
           <thead>
             <tr>
+              <th style="width:44px" class="admin-only text-center"></th>
               <th>เลขที่ PO</th><th>ร้านค้า</th><th>อ้างอิงซ่อม</th>
               <th>ทะเบียนรถ</th><th>วันที่ออก</th><th>สถานะ</th>
               <th>การพิมพ์</th>
@@ -41,7 +56,7 @@
             </tr>
           </thead>
           <tbody id="poTableBody">
-            <tr><td colspan="8" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+            <tr><td colspan="9" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
           </tbody>
         </table>
       </div>

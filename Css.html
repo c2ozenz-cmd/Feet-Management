@@ -945,6 +945,44 @@ body {
   min-height: 36px;
 }
 
+.po-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  background: var(--claude-surface);
+  border: 1px solid var(--claude-border);
+  border-radius: var(--radius);
+  box-shadow: var(--claude-shadow);
+}
+
+.po-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--claude-secondary);
+}
+
+#poBulkSendLineBtn {
+  border-color: #06C755;
+  color: #06C755;
+  background: transparent;
+}
+
+#poBulkSendLineBtn:not(:disabled):hover {
+  background: #06C755;
+  color: #fff;
+}
+
+#poBulkSendLineBtn:disabled {
+  opacity: .45;
+}
+
 .mobile-task-hub {
   display: none;
 }

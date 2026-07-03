@@ -697,6 +697,48 @@ function sendPOToLine(poNo) {
   }
 }
 
+function sendPOsToLineQueue(poNos) {
+  try {
+    if (!Array.isArray(poNos) || !poNos.length) {
+      return { success: false, message: 'ไม่พบรายการ PO ที่เลือก' };
+    }
+
+    const uniqueNos = [];
+    poNos.forEach(poNo => {
+      const cleanNo = String(poNo || '').trim();
+      if (cleanNo && uniqueNos.indexOf(cleanNo) === -1) uniqueNos.push(cleanNo);
+    });
+
+    if (!uniqueNos.length) {
+      return { success: false, message: 'ไม่พบรายการ PO ที่เลือก' };
+    }
+
+    const results = uniqueNos.map((poNo, idx) => {
+      const res = sendPOToLine(poNo);
+      if (idx < uniqueNos.length - 1) Utilities.sleep(300);
+      return {
+        poNo       : poNo,
+        success    : !!(res && res.success),
+        alreadySent: !!(res && res.alreadySent),
+        code       : res && res.code,
+        message    : (res && (res.message || res.body)) || ''
+      };
+    });
+
+    return {
+      success: true,
+      total  : uniqueNos.length,
+      sent   : results.filter(r => r.success).length,
+      skipped: results.filter(r => !r.success && r.alreadySent).length,
+      failed : results.filter(r => !r.success && !r.alreadySent).length,
+      results: results
+    };
+  } catch (e) {
+    Logger.log('sendPOsToLineQueue error: ' + e.message);
+    return { success: false, message: e.message };
+  }
+}
+
 function forceSendPOToLine(poNo) {
   try {
     const pos = getPOs();
