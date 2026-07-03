@@ -9,6 +9,7 @@ let allRepairs = [];
 let allPOs = [];
 let currentPOList = [];
 let selectedPONos = new Set();
+let poSortMode = 'poNoDesc';
 let allStock = [];
 let allBuses = [];
 let deductRows = [];
@@ -1087,10 +1088,44 @@ function poStatusSelectHtml(poNo, currentStatus) {
            background-repeat:no-repeat;background-position:right 8px center;background-size:10px">${options}</select>`;
 }
 
+function getPONoSortValue(poNo) {
+  const digits = String(poNo || '').match(/\d+/g);
+  if (!digits) return 0;
+  return Number(digits.join('')) || 0;
+}
+
+function sortPOList(pos) {
+  const modeEl = document.getElementById('poSortMode');
+  poSortMode = modeEl ? modeEl.value : (poSortMode || 'poNoDesc');
+  const textCompare = (a, b) => String(a || '').localeCompare(String(b || ''), 'th');
+  const dateValue = value => {
+    const time = new Date(value || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
+  };
+
+  return [...pos].sort((a, b) => {
+    switch (poSortMode) {
+      case 'poNoAsc':
+        return getPONoSortValue(a.poNo) - getPONoSortValue(b.poNo) || textCompare(a.poNo, b.poNo);
+      case 'issueDateDesc':
+        return dateValue(b.issueDate) - dateValue(a.issueDate) || getPONoSortValue(b.poNo) - getPONoSortValue(a.poNo);
+      case 'issueDateAsc':
+        return dateValue(a.issueDate) - dateValue(b.issueDate) || getPONoSortValue(a.poNo) - getPONoSortValue(b.poNo);
+      case 'shopAsc':
+        return textCompare(a.shopName, b.shopName) || getPONoSortValue(b.poNo) - getPONoSortValue(a.poNo);
+      case 'statusAsc':
+        return textCompare(a.status, b.status) || getPONoSortValue(b.poNo) - getPONoSortValue(a.poNo);
+      case 'poNoDesc':
+      default:
+        return getPONoSortValue(b.poNo) - getPONoSortValue(a.poNo) || textCompare(b.poNo, a.poNo);
+    }
+  });
+}
+
 function renderPOTable(pos) {
   const tbody = document.getElementById('poTableBody');
   tbody.closest('table').classList.add('table-card-mobile');
-  currentPOList = [...pos].sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
+  currentPOList = sortPOList(pos);
   if (!pos.length) {
     tbody.innerHTML = `<tr><td colspan="9" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
     syncPOBulkActions();

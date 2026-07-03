@@ -19,6 +19,14 @@
       <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
       <option value="รับของแล้ว">รับของแล้ว</option>
     </select>
+    <select id="poSortMode" class="form-select" style="max-width:220px" onchange="filterPOs()">
+      <option value="poNoDesc" selected>เลข PO ล่าสุด</option>
+      <option value="poNoAsc">เลข PO เก่าสุด</option>
+      <option value="issueDateDesc">วันที่ออกล่าสุด</option>
+      <option value="issueDateAsc">วันที่ออกเก่าสุด</option>
+      <option value="shopAsc">ร้านค้า A-Z</option>
+      <option value="statusAsc">สถานะ</option>
+    </select>
   </div>
 
   <div class="mobile-filter-chips">
