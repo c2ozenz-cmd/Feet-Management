@@ -235,7 +235,12 @@ function handlePostback(event) {
         saveApprovalInfo('repair', id, lineUserId);
         // ── ส่ง Flex ผลอนุมัติไปกลุ่ม (พร้อมปุ่มช่าง) — Reply ฟรี ──
         const plate   = repair?.plate || '';
-        replyLineFlex(replyToken, buildApprovalResultFlex('repair', id, approverName, dateStr, plate));
+        const flexMsg = buildApprovalResultFlex('repair', id, approverName, dateStr, plate);
+        const replyRes = replyLineFlex(replyToken, flexMsg);
+        if (!replyRes || !replyRes.success) {
+          const groupId = getLineGroupId('service');
+          if (groupId) pushLineFlex(groupId, flexMsg);
+        }
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
       }
@@ -262,7 +267,7 @@ function handlePostback(event) {
         saveApprovalInfo('po', id, lineUserId);
         const plate = po?.plate || '';
 
-        // ── สร้าง PDF (ครอบ try/catch กันค้างทั้ง process ถ้าสร้าง PDF พัง) ──
+        // ── สร้าง PDF ให้เสร็จก่อน แล้วค่อยส่ง LINE พร้อมไฟล์ ──
         SpreadsheetApp.flush();
         let pdfUrl = '';
         try {
@@ -273,12 +278,7 @@ function handlePostback(event) {
         }
 
         const flexMsg = buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl);
-
-        // ── ลองส่งแบบ Reply ก่อน (ฟรี ไม่กินโควต้า Push) ──
         const replyRes = replyLineFlex(replyToken, flexMsg);
-
-        // ── ถ้า Reply ไม่สำเร็จ (เช่น replyToken หมดอายุเพราะ PDF ใช้เวลานาน)
-        //     ค่อย fallback เป็น Push เข้ากลุ่มแทน กันไม่ให้ Flex หายไปเฉยๆ ──
         if (!replyRes || !replyRes.success) {
           const groupId = getLineGroupId('po');
           if (groupId) {
