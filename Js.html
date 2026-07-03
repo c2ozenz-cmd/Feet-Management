@@ -10,6 +10,7 @@ let allPOs = [];
 let currentPOList = [];
 let selectedPONos = new Set();
 let poSortMode = 'poNoDesc';
+let currentPrintPONos = [];
 let allStock = [];
 let allBuses = [];
 let deductRows = [];
@@ -1201,6 +1202,7 @@ function clearPOSelection() {
 function syncPOBulkActions() {
   const countEl = document.getElementById('poSelectedCount');
   const sendBtn = document.getElementById('poBulkSendLineBtn');
+  const printBtn = document.getElementById('poBulkPrintBtn');
   const selectAll = document.getElementById('poSelectAll');
   const visibleNos = currentPOList.map(p => p.poNo);
   const selectedVisibleCount = visibleNos.filter(poNo => selectedPONos.has(poNo)).length;
@@ -1208,19 +1210,25 @@ function syncPOBulkActions() {
 
   if (countEl) countEl.textContent = `เลือก ${totalSelected} รายการ`;
   if (sendBtn) sendBtn.disabled = totalSelected === 0;
+  if (printBtn) printBtn.disabled = totalSelected === 0;
   if (selectAll) {
     selectAll.checked = visibleNos.length > 0 && selectedVisibleCount === visibleNos.length;
     selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleNos.length;
   }
 }
 
-function sendSelectedPOsToLine() {
+function getOrderedSelectedPONos() {
   const orderedNos = currentPOList
     .map(p => p.poNo)
     .filter(poNo => selectedPONos.has(poNo));
   selectedPONos.forEach(poNo => {
     if (!orderedNos.includes(poNo)) orderedNos.push(poNo);
   });
+  return orderedNos;
+}
+
+function sendSelectedPOsToLine() {
+  const orderedNos = getOrderedSelectedPONos();
 
   if (!orderedNos.length) {
     showToast('warning', 'กรุณาเลือก PO ก่อน');
@@ -1278,6 +1286,57 @@ function sendSelectedPOsToLine() {
       })
       .sendPOsToLineQueue(orderedNos);
   });
+}
+
+function getPOForPrintClient(poNo) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(result => resolve({ poNo, result }))
+      .withFailureHandler(err => reject(err))
+      .getPOForPrint(poNo);
+  });
+}
+
+async function printSelectedPOs() {
+  const orderedNos = getOrderedSelectedPONos();
+  if (!orderedNos.length) {
+    showToast('warning', 'กรุณาเลือก PO ก่อน');
+    return;
+  }
+
+  const confirmed = await Swal.fire({
+    title: 'พิมพ์ PO ที่เลือก?',
+    text: `ระบบจะเตรียมเอกสาร ${orderedNos.length} ใบต่อกัน`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'พิมพ์',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#0EA5E9',
+    cancelButtonColor: '#6B7280'
+  });
+  if (!confirmed.isConfirmed) return;
+
+  showLoading(`กำลังเตรียมเอกสาร 0/${orderedNos.length}...`);
+  try {
+    const docs = [];
+    for (let i = 0; i < orderedNos.length; i++) {
+      Swal.update({ title: `กำลังเตรียมเอกสาร ${i + 1}/${orderedNos.length}...` });
+      const { poNo, result } = await getPOForPrintClient(orderedNos[i]);
+      if (!result) throw new Error(`ไม่พบข้อมูล PO ${poNo}`);
+      const html = renderPrintPreview(result.po, result.items, result.settings, result.sigUrl, { returnHtml: true });
+      docs.push(`<div class="po-print-bundle-item" style="${i < orderedNos.length - 1 ? 'page-break-after:always;' : ''}">${html}</div>`);
+    }
+
+    currentPrintPONos = orderedNos.slice();
+    document.getElementById('editPONo').value = 'BULK';
+    document.getElementById('printPreview').innerHTML =
+      `<div id="poPrintDoc" style="font-family:'Sarabun',sans-serif;font-size:12px;color:#000">${docs.join('')}</div>`;
+    Swal.close();
+    new bootstrap.Modal(document.getElementById('printModal')).show();
+  } catch (err) {
+    Swal.close();
+    showToast('error', err.message || 'เตรียมเอกสารไม่สำเร็จ');
+  }
 }
 
 function applyPOPreset(kind) {
@@ -1749,6 +1808,7 @@ function previewPO() {
 
 function previewPOFromNo(poNo) {
   document.getElementById('editPONo').value = poNo;
+  currentPrintPONos = [poNo];
   const po = allPOs.find(p => p.poNo === poNo);
   if (!po) return;
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
@@ -1769,7 +1829,7 @@ function _settingsToObj(arr) {
   return o;
 }
 
-function renderPrintPreview(po, items, settingsArr, sigUrl) {
+function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
   const s       = Array.isArray(settingsArr) ? _settingsToObj(settingsArr) : (settingsArr || {});
   const vatType = po.vatType || 'none';
   const subtotal = items.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0);
@@ -2044,6 +2104,9 @@ function renderPrintPreview(po, items, settingsArr, sigUrl) {
     </div>`;
   }).join('');
 
+  if (options.returnHtml) return pages;
+
+  currentPrintPONos = po?.poNo ? [po.poNo] : [];
   document.getElementById('printPreview').innerHTML =
     `<div id="poPrintDoc" style="font-family:'Sarabun',sans-serif;font-size:12px;color:#000">${pages}</div>`;
 
@@ -2120,13 +2183,21 @@ function printPO() {
       </body></html>`);
       win.document.close();
 
-      const poNo = document.getElementById('editPONo').value;
-      if (poNo && poNo !== 'PREVIEW') {
-        google.script.run
-          .withSuccessHandler(() => {
-            loadPOs();
-          })
-          .markPOAsPrinted(poNo);
+      let printedNos = currentPrintPONos.filter(poNo => poNo && poNo !== 'PREVIEW' && poNo !== 'BULK');
+      if (!printedNos.length) {
+        const poNo = document.getElementById('editPONo').value;
+        if (poNo && poNo !== 'PREVIEW' && poNo !== 'BULK') printedNos = [poNo];
+      }
+      if (printedNos.length) {
+        let done = 0;
+        printedNos.forEach(poNo => {
+          google.script.run
+            .withSuccessHandler(() => {
+              done++;
+              if (done === printedNos.length) loadPOs();
+            })
+            .markPOAsPrinted(poNo);
+        });
       }
 
       // ปิด loading หลังเปิดหน้าต่างสำเร็จ
