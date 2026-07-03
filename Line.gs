@@ -864,6 +864,67 @@ function pushLineMessage(to, text) {
   }, token);
 }
 
+function callLineGetAPI(url, token) {
+  const res = UrlFetchApp.fetch(url, {
+    method            : 'get',
+    headers           : { 'Authorization': 'Bearer ' + token },
+    muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  return {
+    success: code >= 200 && code < 300,
+    code,
+    body
+  };
+}
+
+function getLineQuotaStatus() {
+  try {
+    const token = getLineToken();
+    if (!token) {
+      return { success: false, message: 'ไม่พบ LINE_CHANNEL_TOKEN ใน Settings' };
+    }
+
+    const quotaRes = callLineGetAPI('https://api.line.me/v2/bot/message/quota', token);
+    if (!quotaRes.success) {
+      return {
+        success: false,
+        message: 'ดึงโควต้ารวมไม่สำเร็จ',
+        code   : quotaRes.code,
+        body   : quotaRes.body
+      };
+    }
+
+    const usageRes = callLineGetAPI('https://api.line.me/v2/bot/message/quota/consumption', token);
+    if (!usageRes.success) {
+      return {
+        success: false,
+        message: 'ดึงจำนวนการใช้งานโควต้าไม่สำเร็จ',
+        code   : usageRes.code,
+        body   : usageRes.body
+      };
+    }
+
+    const quota = JSON.parse(quotaRes.body || '{}');
+    const usage = JSON.parse(usageRes.body || '{}');
+    const used = Number(usage.totalUsage || 0);
+    const isLimited = quota.type === 'limited';
+    const limit = isLimited ? Number(quota.value || 0) : null;
+
+    return {
+      success    : true,
+      type       : quota.type || '',
+      limit      : limit,
+      used       : used,
+      remaining  : isLimited ? Math.max(0, limit - used) : null,
+      updatedAt  : new Date().toISOString()
+    };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function logLineMessage(url, payload, responseCode) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();

@@ -10,7 +10,7 @@
 
 <!-- Stats Card -->
 <div class="row g-3 mb-4">
-  <div class="col-md-4">
+  <div class="col-6 col-lg-3">
     <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#F8FAFC;border-left:4px solid var(--claude-primary)">
       <div style="font-size:24px;color:var(--claude-primary)"><i class="bi bi-chat-dots-fill"></i></div>
       <div>
@@ -19,7 +19,7 @@
       </div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-6 col-lg-3">
     <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#F0FDF4;border-left:4px solid #10B981">
       <div style="font-size:24px;color:#10B981"><i class="bi bi-chat-quote-fill"></i></div>
       <div>
@@ -28,12 +28,27 @@
       </div>
     </div>
   </div>
-  <div class="col-md-4">
+  <div class="col-6 col-lg-3">
     <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#FFF7ED;border-left:4px solid #F59E0B">
       <div style="font-size:24px;color:#F59E0B"><i class="bi bi-send-fill"></i></div>
       <div>
         <div class="text-muted small">แจ้งเตือนระบบ (คิดเงิน)</div>
         <h4 class="mb-0 fw-bold text-warning" id="lineLogPaidCount">0</h4>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card p-3 d-flex flex-row align-items-center gap-3" style="background:#EFF6FF;border-left:4px solid var(--claude-info)">
+      <div style="font-size:24px;color:var(--claude-info)"><i class="bi bi-speedometer2"></i></div>
+      <div class="flex-grow-1">
+        <div class="text-muted small d-flex align-items-center justify-content-between gap-2">
+          <span>โควต้า Push เดือนนี้</span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="loadLineQuotaStatus()" title="รีเฟรชโควต้า">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <h4 class="mb-0 fw-bold text-info" id="lineQuotaUsed">—</h4>
+        <div class="text-muted small" id="lineQuotaDetail">กำลังโหลด...</div>
       </div>
     </div>
   </div>

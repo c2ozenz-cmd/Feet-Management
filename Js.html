@@ -4199,6 +4199,7 @@ let allLineLogs = [];
 function loadLineLog() {
   const tbody = document.getElementById('lineLogTableBody');
   tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล Log...</td></tr>';
+  loadLineQuotaStatus();
   
   google.script.run.withSuccessHandler(logs => {
     allLineLogs = logs || [];
@@ -4207,6 +4208,39 @@ function loadLineLog() {
   }).withFailureHandler(err => {
     tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-5">โหลดข้อมูลผิดพลาด: ${err.message}</td></tr>`;
   }).getLineLogs();
+}
+
+function loadLineQuotaStatus() {
+  const usedEl = document.getElementById('lineQuotaUsed');
+  const detailEl = document.getElementById('lineQuotaDetail');
+  if (!usedEl || !detailEl) return;
+
+  usedEl.textContent = '—';
+  detailEl.textContent = 'กำลังโหลด...';
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.success) {
+        usedEl.textContent = '—';
+        detailEl.textContent = res?.message || 'ดึงโควต้าไม่สำเร็จ';
+        return;
+      }
+
+      usedEl.textContent = Number(res.used || 0).toLocaleString('th-TH');
+      if (res.type === 'limited') {
+        const limit = Number(res.limit || 0);
+        const remaining = Number(res.remaining || 0);
+        const pct = limit > 0 ? Math.min(100, Math.round((Number(res.used || 0) / limit) * 100)) : 0;
+        detailEl.textContent = `ใช้ ${pct}% | เหลือ ${remaining.toLocaleString('th-TH')} / ${limit.toLocaleString('th-TH')}`;
+      } else {
+        detailEl.textContent = 'บัญชีนี้ไม่จำกัดโควต้า';
+      }
+    })
+    .withFailureHandler(err => {
+      usedEl.textContent = '—';
+      detailEl.textContent = err.message || 'ดึงโควต้าไม่สำเร็จ';
+    })
+    .getLineQuotaStatus();
 }
 
 function renderLineLogTable(logs) {
