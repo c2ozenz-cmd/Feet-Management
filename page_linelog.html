@@ -8,6 +8,24 @@
   </button>
 </div>
 
+<div class="card mb-3" style="background:#EFF6FF;border-left:4px solid var(--claude-info)">
+  <div class="card-body d-flex align-items-center gap-3">
+    <div style="font-size:28px;color:var(--claude-info)"><i class="bi bi-speedometer2"></i></div>
+    <div class="flex-grow-1">
+      <div class="d-flex align-items-center justify-content-between gap-2">
+        <div class="fw-semibold" style="color:var(--claude-secondary)">โควต้า Push เดือนนี้</div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadLineQuotaStatus()" title="รีเฟรชโควต้า">
+          <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรช
+        </button>
+      </div>
+      <div class="d-flex align-items-end gap-2 mt-1">
+        <h3 class="mb-0 fw-bold text-info" id="lineQuotaUsed">—</h3>
+        <div class="text-muted small pb-1" id="lineQuotaDetail">กำลังโหลด...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Stats Card -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
@@ -47,8 +65,8 @@
             <i class="bi bi-arrow-clockwise"></i>
           </button>
         </div>
-        <h4 class="mb-0 fw-bold text-info" id="lineQuotaUsed">—</h4>
-        <div class="text-muted small" id="lineQuotaDetail">กำลังโหลด...</div>
+        <h4 class="mb-0 fw-bold text-info" id="lineQuotaUsedGrid">—</h4>
+        <div class="text-muted small" id="lineQuotaDetailGrid">กำลังโหลด...</div>
       </div>
     </div>
   </div>

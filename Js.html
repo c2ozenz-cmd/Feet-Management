@@ -4211,34 +4211,40 @@ function loadLineLog() {
 }
 
 function loadLineQuotaStatus() {
-  const usedEl = document.getElementById('lineQuotaUsed');
-  const detailEl = document.getElementById('lineQuotaDetail');
-  if (!usedEl || !detailEl) return;
+  const usedEls = ['lineQuotaUsed', 'lineQuotaUsedGrid']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  const detailEls = ['lineQuotaDetail', 'lineQuotaDetailGrid']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  if (!usedEls.length || !detailEls.length) return;
 
-  usedEl.textContent = '—';
-  detailEl.textContent = 'กำลังโหลด...';
+  const setQuotaDisplay = (usedText, detailText) => {
+    usedEls.forEach(el => { el.textContent = usedText; });
+    detailEls.forEach(el => { el.textContent = detailText; });
+  };
+
+  setQuotaDisplay('—', 'กำลังโหลด...');
 
   google.script.run
     .withSuccessHandler(res => {
       if (!res || !res.success) {
-        usedEl.textContent = '—';
-        detailEl.textContent = res?.message || 'ดึงโควต้าไม่สำเร็จ';
+        setQuotaDisplay('—', res?.message || 'ดึงโควต้าไม่สำเร็จ');
         return;
       }
 
-      usedEl.textContent = Number(res.used || 0).toLocaleString('th-TH');
+      const usedText = Number(res.used || 0).toLocaleString('th-TH');
       if (res.type === 'limited') {
         const limit = Number(res.limit || 0);
         const remaining = Number(res.remaining || 0);
         const pct = limit > 0 ? Math.min(100, Math.round((Number(res.used || 0) / limit) * 100)) : 0;
-        detailEl.textContent = `ใช้ ${pct}% | เหลือ ${remaining.toLocaleString('th-TH')} / ${limit.toLocaleString('th-TH')}`;
+        setQuotaDisplay(usedText, `ใช้ ${pct}% | เหลือ ${remaining.toLocaleString('th-TH')} / ${limit.toLocaleString('th-TH')}`);
       } else {
-        detailEl.textContent = 'บัญชีนี้ไม่จำกัดโควต้า';
+        setQuotaDisplay(usedText, 'บัญชีนี้ไม่จำกัดโควต้า');
       }
     })
     .withFailureHandler(err => {
-      usedEl.textContent = '—';
-      detailEl.textContent = err.message || 'ดึงโควต้าไม่สำเร็จ';
+      setQuotaDisplay('—', err.message || 'ดึงโควต้าไม่สำเร็จ');
     })
     .getLineQuotaStatus();
 }
