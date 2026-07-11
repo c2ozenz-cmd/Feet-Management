@@ -11,7 +11,7 @@
   </div>
 
   <div class="search-bar">
-    <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า..." oninput="filterPOs()">
+    <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า / รหัสกลุ่ม GRP..." oninput="filterPOs()">
     <input type="month" id="poMonthFilter" class="form-control" style="max-width:180px" onchange="filterPOs()">
     <select id="poStatusFilter" class="form-select" style="max-width:180px" onchange="filterPOs()">
       <option value="">ทุกสถานะ</option>
@@ -95,6 +95,8 @@
   </div>
 
   <input type="hidden" id="editPONo">
+  <input type="hidden" id="poGrpRef">
+  <input type="hidden" id="poQuoteNoIsAuto" value="false">
 
   <!-- Card 1: ข้อมูลร้านค้า -->
 <div class="card">
@@ -161,8 +163,20 @@
         <input type="date" id="poQuoteDate" class="form-control">
       </div>
       <div class="col-md-4">
-        <label class="form-label">เลขที่ใบเสนอราคา</label>
-        <input type="text" id="poQuoteNo" class="form-control" placeholder="เลขที่ใบเสนอราคา">
+        <label class="form-label">เลขที่ใบเสนอราคา
+          <span class="badge ms-1" id="quoteNoAutoBadge"
+            style="font-size:9px;background:rgba(99,102,241,0.15);color:#6366f1;display:none">
+            <i class="bi bi-magic me-1"></i>สร้างอัตโนมัติ
+          </span>
+        </label>
+        <div class="input-group">
+          <input type="text" id="poQuoteNo" class="form-control" placeholder="(ว่าง = สร้างอัตโนมัติ)">
+          <button class="btn btn-outline-secondary" type="button" title="ล้างค่า — ระบบจะสร้างเลขอัตโนมัติตอนบันทึก"
+            onclick="clearQuoteNo()" id="clearQuoteNoBtn" style="display:none">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="text-muted" style="font-size:10px;margin-top:3px" id="poGrpRefDisplay"></div>
       </div>
       <div class="col-md-4">
         <label class="form-label">อ้างอิงเลขจ็อบซ่อม</label>
@@ -236,16 +250,19 @@
     <div class="card-body">
       <div class="po-stepper" id="poStepperForm"></div>
       <div class="mt-3 d-flex gap-2 flex-wrap admin-only">
-      <button class="btn btn-sm btn-outline-secondary" onclick="changePOStatus('รออนุมัติ')"><i class="bi bi-hourglass me-1"></i>รออนุมัติ</button>
-      <button class="btn btn-sm btn-warning" onclick="changePOStatus('อนุมัติแล้ว')"><i class="bi bi-check me-1"></i>อนุมัติแล้ว</button>
-      <button class="btn btn-sm btn-success" onclick="changePOStatus('รับของแล้ว')"><i class="bi bi-box-seam me-1"></i>รับของแล้ว</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="changePOStatus('รออนุมัติ')"><i class="bi bi-hourglass me-1"></i>รออนุมัติ</button>
+        <button class="btn btn-sm btn-warning" onclick="changePOStatus('อนุมัติแล้ว')"><i class="bi bi-check me-1"></i>อนุมัติแล้ว</button>
+        <button class="btn btn-sm btn-success" onclick="changePOStatus('รับของแล้ว')"><i class="bi bi-box-seam me-1"></i>รับของแล้ว</button>
       </div>
     </div>
   </div>
 
-  <div class="d-flex gap-2 justify-content-end">
+  <div class="d-flex gap-2 justify-content-end flex-wrap">
     <button class="btn btn-outline-secondary" onclick="showPOList()"><i class="bi bi-x-lg me-1"></i>ยกเลิก</button>
-    <button class="btn btn-info" onclick="previewPO()"><i class="bi bi-printer me-1"></i>Preview & พิมพ์</button>
+    <button class="btn btn-outline-success" id="createLinkedPOBtn" onclick="createLinkedPO()" style="display:none">
+      <i class="bi bi-file-earmark-plus me-1"></i>สร้าง PO คู่
+    </button>
+    <button class="btn btn-info" onclick="previewPO()"><i class="bi bi-printer me-1"></i>Preview &amp; พิมพ์</button>
     <button class="btn btn-primary" onclick="savePO()"><i class="bi bi-save me-1"></i>บันทึก</button>
   </div>
 </div>

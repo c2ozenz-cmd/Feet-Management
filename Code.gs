@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Code.gs — Bus Repair Management System
 // Google Apps Script Backend
 // ============================================================
@@ -445,6 +445,57 @@ function deleteRepair(repairNo) {
 }
 
 // ---------- PURCHASE ORDERS ----------
+
+function generateGrpRef() {
+  const now    = new Date();
+  const yyyy   = String(now.getFullYear());
+  const mm     = String(now.getMonth() + 1).padStart(2, '0');
+  const prefix = 'GRP-' + yyyy + mm + '-';
+  const sheet  = getSheetSafe('po');
+  let max = 0;
+  if (sheet) {
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => String(h || '').trim());
+    const grpIdx  = headers.indexOf('GrpRef');
+    if (grpIdx !== -1) {
+      data.slice(1).forEach(r => {
+        const val = String(r[grpIdx] || '');
+        if (val.startsWith(prefix)) {
+          const n = parseInt(val.slice(-3));
+          if (n > max) max = n;
+        }
+      });
+    }
+  }
+  return prefix + String(max + 1).padStart(3, '0');
+}
+
+function generateQuoteNoAuto() {
+  const now     = new Date();
+  const yyyy    = String(now.getFullYear());
+  const mm      = String(now.getMonth() + 1).padStart(2, '0');
+  const dd      = String(now.getDate()).padStart(2, '0');
+  const dateStr = yyyy + mm + dd;
+  const prefix  = 'QT-' + dateStr + '-';
+  const sheet   = getSheetSafe('po');
+  let max = 0;
+  if (sheet) {
+    const data    = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => String(h || '').trim());
+    const qIdx    = headers.indexOf('QuoteNo');
+    if (qIdx !== -1) {
+      data.slice(1).forEach(r => {
+        const val = String(r[qIdx] || '');
+        if (val.startsWith(prefix)) {
+          const n = parseInt(val.slice(-3));
+          if (n > max) max = n;
+        }
+      });
+    }
+  }
+  return prefix + String(max + 1).padStart(3, '0');
+}
+
 function generatePONumber() {
   const now    = new Date();
   const yy     = String(now.getFullYear()).slice(-2);
@@ -461,7 +512,6 @@ function generatePONumber() {
   });
   return prefix + String(max + 1).padStart(4, '0');
 }
-
 function getPOs() {
   try {
     const sheet = getSheetSafe('po');
@@ -492,11 +542,13 @@ function getPOs() {
         createdBy   : String(poRaw.CreatedBy || ''),
         createdAt   : poRaw.CreatedAt instanceof Date ? poRaw.CreatedAt.toISOString() : String(poRaw.CreatedAt || ''),
         createdBySignatureUrl: String(poRaw.createdBySignatureUrl || getUserSignatureByName(String(poRaw.CreatedBy || '')) || ''),
-        approvedBy  : String(poRaw.approvedBy || ''),
-        approvedAt  : String(poRaw.approvedAt || ''),
-        lineSentAt  : String(poRaw.lineSentAt || ''),
-        pdfUrl      : String(poRaw.pdfUrl || ''),
-        printedAt   : String(poRaw.printedAt || '')
+        approvedBy    : String(poRaw.approvedBy || ''),
+        approvedAt    : String(poRaw.approvedAt || ''),
+        lineSentAt    : String(poRaw.lineSentAt || ''),
+        pdfUrl        : String(poRaw.pdfUrl || ''),
+        printedAt     : String(poRaw.printedAt || ''),
+        grpRef        : String(poRaw.GrpRef || ''),
+        quoteNoIsAuto : String(poRaw.QuoteNoIsAuto || '') === 'true'
       };
     });
   } catch (e) { return []; }
@@ -524,6 +576,20 @@ function savePO(po, items) {
     let poNo = po.poNo;
     const createdBySignatureUrl = po.createdBySignatureUrl || getUserSignatureByName(po.createdBy) || '';
 
+    // ── Auto-generate QuoteNo ถ้าช่องว่างเปล่า ──
+    let quoteNo       = po.quoteNo || '';
+    let quoteNoIsAuto = false;
+    if (!quoteNo.trim()) {
+      quoteNo       = generateQuoteNoAuto();
+      quoteNoIsAuto = true;
+    }
+
+    // ── GrpRef: ใช้ที่ส่งมา หรือสร้างใหม่ ──
+    let grpRef = po.grpRef || '';
+    if (!grpRef.trim()) {
+      grpRef = generateGrpRef();
+    }
+
     if (!poNo) {
       poNo = generatePONumber();
       const row = headers.map(() => '');
@@ -534,13 +600,15 @@ function savePO(po, items) {
       row[colIdx('IssueDate')] = po.issueDate;
       row[colIdx('QuoteDate')] = po.quoteDate;
       row[colIdx('RefRepairNo')] = po.refRepairNo;
-      row[colIdx('QuoteNo')] = po.quoteNo;
+      row[colIdx('QuoteNo')] = quoteNo;
       row[colIdx('Plate')] = po.plate;
       row[colIdx('VatType')] = po.vatType;
       row[colIdx('Status')] = 'รออนุมัติ';
       row[colIdx('CreatedBy')] = po.createdBy;
       row[colIdx('CreatedAt')] = new Date().toISOString();
       row[colIdx('createdBySignatureUrl')] = createdBySignatureUrl;
+      if (colIdx('GrpRef') !== -1)      row[colIdx('GrpRef')]      = grpRef;
+      if (colIdx('QuoteNoIsAuto') !== -1) row[colIdx('QuoteNoIsAuto')] = quoteNoIsAuto ? 'true' : 'false';
       poSheet.appendRow(row);
     } else {
       const data = poSheet.getDataRange().getValues();
@@ -555,14 +623,24 @@ function savePO(po, items) {
           row[colIdx('IssueDate')] = po.issueDate;
           row[colIdx('QuoteDate')] = po.quoteDate;
           row[colIdx('RefRepairNo')] = po.refRepairNo;
-          row[colIdx('QuoteNo')] = po.quoteNo;
+          row[colIdx('QuoteNo')] = quoteNo;
           row[colIdx('Plate')] = po.plate;
           row[colIdx('VatType')] = po.vatType;
           row[colIdx('Status')] = data[i][colIdx('Status')] || 'รออนุมัติ';
           row[colIdx('CreatedBy')] = po.createdBy;
           row[colIdx('CreatedAt')] = data[i][colIdx('CreatedAt')] || new Date().toISOString();
           row[colIdx('createdBySignatureUrl')] = data[i][colIdx('createdBySignatureUrl')] || createdBySignatureUrl;
+          // คง GrpRef เดิมไว้ถ้ามีแล้ว ไม่งั้นใช้ grpRef ใหม่
+          if (colIdx('GrpRef') !== -1) {
+            row[colIdx('GrpRef')] = String(data[i][colIdx('GrpRef')] || '') || grpRef;
+          }
+          if (colIdx('QuoteNoIsAuto') !== -1) {
+            // อัปเดต QuoteNoIsAuto เฉพาะถ้าเป็น auto ใหม่
+            row[colIdx('QuoteNoIsAuto')] = quoteNoIsAuto ? 'true' : (String(data[i][colIdx('QuoteNoIsAuto')] || 'false'));
+          }
           poSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+          // ดึง grpRef จริงจาก sheet (ในกรณี edit ใช้ grpRef เดิม)
+          grpRef = row[colIdx('GrpRef')] || grpRef;
           break;
         }
       }
@@ -576,7 +654,7 @@ function savePO(po, items) {
       itemsSheet.appendRow([poNo, idx + 1, item.partName, item.qty, item.unit, item.pricePerUnit, item.discount, item.amount, item.note || '']);
     });
 
-    return { success: true, poNo };
+    return { success: true, poNo, grpRef, quoteNo, quoteNoIsAuto };
   } catch (e) { return { success: false, message: e.message }; }
 }
 
@@ -587,7 +665,7 @@ function ensurePOColumns() {
 
   const data = sheet.getDataRange().getValues();
   const headers = data.length ? data[0].map(h => String(h || '').trim()) : [];
-  const required = ['PONo', 'ShopName', 'ShopAddress', 'TaxID', 'IssueDate', 'QuoteDate', 'RefRepairNo', 'QuoteNo', 'Plate', 'VatType', 'Status', 'CreatedBy', 'CreatedAt', 'createdBySignatureUrl', 'approvedBy', 'approvedAt', 'lineSentAt', 'pdfUrl'];
+  const required = ['PONo', 'ShopName', 'ShopAddress', 'TaxID', 'IssueDate', 'QuoteDate', 'RefRepairNo', 'QuoteNo', 'Plate', 'VatType', 'Status', 'CreatedBy', 'CreatedAt', 'createdBySignatureUrl', 'approvedBy', 'approvedAt', 'lineSentAt', 'pdfUrl', 'GrpRef', 'QuoteNoIsAuto'];
 
   let changed = false;
   required.forEach(name => {

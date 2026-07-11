@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 // ============================================================
 // Js.html — Bus Repair System Frontend Logic
 // ============================================================
@@ -1136,13 +1136,18 @@ function renderPOTable(pos) {
   tbody.innerHTML = currentPOList.map(p => {
     const checked = selectedPONos.has(p.poNo) ? 'checked' : '';
     const canSelect = currentUser?.role === 'admin';
+    // แสดง GRP badge ถ้ามี grpRef และมี PO อื่นในกลุ่มเดียวกัน
+    const grpSiblings = p.grpRef ? currentPOList.filter(x => x.grpRef === p.grpRef && x.poNo !== p.poNo) : [];
+    const grpBadge = (p.grpRef && grpSiblings.length > 0)
+      ? `<div style="font-size:10px;margin-top:2px"><span class="badge" style="background:rgba(99,102,241,0.13);color:#6366f1;font-weight:500">🔗 ${p.grpRef}</span></div>`
+      : '';
     return `
     <tr>
       <td data-label="Select" class="admin-only text-center">
         <input type="checkbox" class="form-check-input po-row-check" value="${p.poNo}" ${checked}
           ${canSelect ? '' : 'disabled'} onchange="togglePOSelection('${p.poNo}', this.checked)">
       </td>
-      <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span></td>
+      <td data-label="เลขที่ PO"><span class="fw-semibold" style="color:var(--claude-primary)">${p.poNo}</span>${grpBadge}</td>
       <td data-label="ร้านค้า">${p.shopName}</td>
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
@@ -1172,7 +1177,7 @@ function filterPOs() {
   const s = document.getElementById('poStatusFilter').value;
   const m = document.getElementById('poMonthFilter').value;
   renderPOTable(allPOs.filter(p =>
-    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q)) &&
+    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.grpRef || '').toLowerCase().includes(q)) &&
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
   ));
@@ -1361,39 +1366,64 @@ function showPOList() {
   document.getElementById('poFormView').classList.add('d-none');
 }
 
-function showPOForm(po = null) {
+function showPOForm(po = null, options = {}) {
   document.getElementById('poListView').classList.add('d-none');
   document.getElementById('poFormView').classList.remove('d-none');
   poItemRows = [];
 
+  const linkedBtn = document.getElementById('createLinkedPOBtn');
+
   if (po) {
-    document.getElementById('poFormTitle').textContent = 'แก้ไข PO';
-    document.getElementById('poFormBreadcrumb').textContent = po.poNo;
-    document.getElementById('editPONo').value = po.poNo;
-    document.getElementById('poNo').value = po.poNo;
-    document.getElementById('poShopName').value = po.shopName || '';
-    document.getElementById('poShopAddress').value = po.shopAddress || '';
-    document.getElementById('poTaxId').value = po.taxId || '';
-    document.getElementById('poIssueDate').value = po.issueDate || '';
-    document.getElementById('poQuoteDate').value = po.quoteDate || '';
-    document.getElementById('poQuoteNo').value = po.quoteNo || '';
-    document.getElementById('poRefRepairNo').value = po.refRepairNo || '';
-    document.getElementById('poPlate').value = po.plate || '';
-    document.getElementById('poVatType').value = po.vatType || 'none';
+    const isClone = options.cloneFrom === true;
+    document.getElementById('poFormTitle').textContent = isClone
+      ? `เธชเธฃเนเธฒเธ PO เธเธนเน (เธเธฅเธธเนเธก ${po.grpRef || ''})`
+      : 'เนเธเนเนเธ PO';
+    document.getElementById('poFormBreadcrumb').textContent = isClone ? 'เธชเธฃเนเธฒเธเนเธซเธกเน' : po.poNo;
+    document.getElementById('editPONo').value          = isClone ? '' : po.poNo;
+    document.getElementById('poNo').value              = isClone ? '' : po.poNo;
+    document.getElementById('poShopName').value        = po.shopName    || '';
+    document.getElementById('poShopAddress').value     = po.shopAddress || '';
+    document.getElementById('poTaxId').value           = po.taxId       || '';
+    document.getElementById('poIssueDate').value       = po.issueDate   || '';
+    document.getElementById('poQuoteDate').value       = po.quoteDate   || '';
+    document.getElementById('poQuoteNo').value         = po.quoteNo     || '';
+    document.getElementById('poRefRepairNo').value     = isClone ? '' : (po.refRepairNo || '');
+    document.getElementById('poPlate').value           = isClone ? '' : (po.plate || '');
+    document.getElementById('poVatType').value         = po.vatType     || 'none';
+    document.getElementById('poGrpRef').value          = po.grpRef || '';
 
-    document.getElementById('poStatusCard').style.cssText = '';
-    renderPOStepper(po.status);
+    const autoBadge  = document.getElementById('quoteNoAutoBadge');
+    const clearBtn   = document.getElementById('clearQuoteNoBtn');
+    const grpDisplay = document.getElementById('poGrpRefDisplay');
+    if (po.quoteNoIsAuto) {
+      if (autoBadge) autoBadge.style.display = '';
+      if (clearBtn)  clearBtn.style.display  = '';
+    } else {
+      if (autoBadge) autoBadge.style.display = 'none';
+      if (clearBtn)  clearBtn.style.display  = (po.quoteNo ? '' : 'none');
+    }
+    if (grpDisplay) grpDisplay.textContent = po.grpRef ? `\uD83D\uDD17 เธฃเธซเธฑเธชเธเธฅเธธเนเธก: ${po.grpRef}` : '';
 
-    google.script.run.withSuccessHandler(items => {
-      poItemRows = items.map(i => ({ partName: i.partName, qty: i.qty, unit: i.unit, pricePerUnit: i.pricePerUnit, discount: i.discount, amount: i.amount, note: i.note || '' }));
+    if (!isClone) {
+      document.getElementById('poStatusCard').style.cssText = '';
+      renderPOStepper(po.status);
+      if (linkedBtn) linkedBtn.style.display = '';
+      google.script.run.withSuccessHandler(items => {
+        poItemRows = items.map(i => ({ partName: i.partName, qty: i.qty, unit: i.unit, pricePerUnit: i.pricePerUnit, discount: i.discount, amount: i.amount, note: i.note || '' }));
+        renderPOItems();
+        calcPOTotal();
+      }).getPOItems(po.poNo);
+    } else {
+      document.getElementById('poStatusCard').style.display = 'none';
+      if (linkedBtn) linkedBtn.style.display = 'none';
       renderPOItems();
-      calcPOTotal();
-    }).getPOItems(po.poNo);
+    }
   } else {
-    document.getElementById('poFormTitle').textContent = 'สร้าง PO ใหม่';
-    document.getElementById('poFormBreadcrumb').textContent = 'ใหม่';
+    document.getElementById('poFormTitle').textContent = 'เธชเธฃเนเธฒเธ PO เนเธซเธกเน';
+    document.getElementById('poFormBreadcrumb').textContent = 'เนเธซเธกเน';
     document.getElementById('editPONo').value = '';
     document.getElementById('poNo').value = '';
+    document.getElementById('poGrpRef').value = '';
     document.getElementById('poIssueDate').value = todayISO();
     document.getElementById('poShopName').value = '';
     document.getElementById('poShopAddress').value = '';
@@ -1404,9 +1434,32 @@ function showPOForm(po = null) {
     document.getElementById('poPlate').value = pendingPOPlate || '';
     document.getElementById('poVatType').value = 'none';
     document.getElementById('poStatusCard').style.display = 'none';
+    if (linkedBtn) linkedBtn.style.display = 'none';
+    const autoBadge  = document.getElementById('quoteNoAutoBadge');
+    const clearBtn   = document.getElementById('clearQuoteNoBtn');
+    const grpDisplay = document.getElementById('poGrpRefDisplay');
+    if (autoBadge)  autoBadge.style.display  = 'none';
+    if (clearBtn)   clearBtn.style.display   = 'none';
+    if (grpDisplay) grpDisplay.textContent   = '';
     renderPOItems();
     pendingPORepairNo = null; pendingPOPlate = null;
   }
+}
+
+function clearQuoteNo() {
+  document.getElementById('poQuoteNo').value = '';
+  const autoBadge = document.getElementById('quoteNoAutoBadge');
+  const clearBtn  = document.getElementById('clearQuoteNoBtn');
+  if (autoBadge) autoBadge.style.display = 'none';
+  if (clearBtn)  clearBtn.style.display  = 'none';
+}
+
+function createLinkedPO() {
+  const poNo = document.getElementById('editPONo').value;
+  if (!poNo) { showToast('warning', 'เธเธฃเธธเธ“เธฒเธเธฑเธเธ—เธถเธ PO เธเนเธญเธ'); return; }
+  const sourcePO = allPOs.find(p => p.poNo === poNo);
+  if (!sourcePO) { showToast('error', 'เนเธกเนเธเธเธเนเธญเธกเธนเธฅ PO'); return; }
+  showPOForm(sourcePO, { cloneFrom: true });
 }
 
 function editPO(poNo) {
@@ -1418,7 +1471,7 @@ function editPO(poNo) {
 }
 
 function renderPOStepper(currentStatus) {
-  const steps = ['รออนุมัติ', 'อนุมัติแล้ว', 'รับของแล้ว'];
+  const steps = ['เธฃเธญเธญเธเธธเธกเธฑเธ•เธด', 'เธญเธเธธเธกเธฑเธ•เธดเนเธฅเนเธง', 'เธฃเธฑเธเธเธญเธเนเธฅเนเธง'];
   const icons = ['hourglass', 'check', 'check-circle'];
   const curIdx = steps.indexOf(currentStatus);
   document.getElementById('poStepperForm').innerHTML = steps.map((s, i) => {
@@ -1431,7 +1484,7 @@ function renderPOStepper(currentStatus) {
 }
 
 function addPOItem() {
-  poItemRows.push({ partName: '', qty: 1, unit: 'ชิ้น', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
+  poItemRows.push({ partName: '', qty: 1, unit: 'เธเธดเนเธ', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
   renderPOItems();
 }
 
@@ -1445,36 +1498,36 @@ function renderPOItems() {
   const tbody = document.getElementById('poItemsBody');
   tbody.closest('table').classList.add('table-card-mobile');
   if (!poItemRows.length) {
-    tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">ยังไม่มีรายการ</td></tr>';
+    tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">เธขเธฑเธเนเธกเนเธกเธตเธฃเธฒเธขเธเธฒเธฃ</td></tr>';
     return;
   }
   tbody.innerHTML = poItemRows.map((p, i) => `
     <tr>
-      <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
-      <td data-label="อะไหล่">
+      <td data-label="เธฅเธณเธ”เธฑเธ" class="text-muted">${i + 1}</td>
+      <td data-label="เธญเธฐเนเธซเธฅเน">
         <div class="input-group input-group-sm">
-          <input type="text" class="form-control" value="${p.partName || ''}" onchange="poItemRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
-          <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
+          <input type="text" class="form-control" value="${p.partName || ''}" onchange="poItemRows[${i}].partName=this.value" placeholder="เธเธทเนเธญเธญเธฐเนเธซเธฅเน">
+          <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เน€เธฅเธทเธญเธเธเธฒเธ Stock"><i class="bi bi-search"></i></button>
         </div>
         <input type="text" class="form-control form-control-sm mt-1"
           value="${p.note || ''}"
           onchange="poItemRows[${i}].note=this.value"
-          placeholder="📝 หมายเหตุ (เช่น ใช้กับรถ 30-4554)..."
+          placeholder="\uD83D\uDCDD เธซเธกเธฒเธขเน€เธซเธ•เธธ (เน€เธเนเธ เนเธเนเธเธฑเธเธฃเธ– 30-4554)..."
           style="font-size:11px;color:#6b7280;border-style:dashed">
       </td>
-      <td data-label="จำนวน">
+      <td data-label="เธเธณเธเธงเธ">
         <input type="number" class="form-control form-control-sm" value="${p.qty}" min="0" step="0.01" onchange="poItemRows[${i}].qty=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="หน่วย">
+      <td data-label="เธซเธเนเธงเธข">
         <input type="text" class="form-control form-control-sm" value="${p.unit}" onchange="poItemRows[${i}].unit=this.value">
       </td>
-      <td data-label="ราคา/หน่วย">
+      <td data-label="เธฃเธฒเธเธฒ/เธซเธเนเธงเธข">
         <input type="number" class="form-control form-control-sm" value="${p.pricePerUnit}" min="0" step="0.01" onchange="poItemRows[${i}].pricePerUnit=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="ส่วนลด">
+      <td data-label="เธชเนเธงเธเธฅเธ”">
         <input type="number" class="form-control form-control-sm" value="${p.discount}" min="0" step="0.01" onchange="poItemRows[${i}].discount=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="จำนวนเงิน">
+      <td data-label="เธเธณเธเธงเธเน€เธเธดเธ">
         <span id="poAmt_${i}" class="fw-semibold">${fmtNum(p.amount)}</span>
       </td>
       <td data-label="">
@@ -1484,6 +1537,7 @@ function renderPOItems() {
       </td>
     </tr>`).join('');
 }
+
 
 function calcPOItemAmount(idx) {
   const p = poItemRows[idx];
