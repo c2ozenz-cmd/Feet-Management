@@ -1361,6 +1361,7 @@ function applyPOPreset(kind) {
   filterPOs();
 }
 
+
 function showPOList() {
   document.getElementById('poListView').classList.remove('d-none');
   document.getElementById('poFormView').classList.add('d-none');
@@ -1376,9 +1377,9 @@ function showPOForm(po = null, options = {}) {
   if (po) {
     const isClone = options.cloneFrom === true;
     document.getElementById('poFormTitle').textContent = isClone
-      ? `เธชเธฃเนเธฒเธ PO เธเธนเน (เธเธฅเธธเนเธก ${po.grpRef || ''})`
-      : 'เนเธเนเนเธ PO';
-    document.getElementById('poFormBreadcrumb').textContent = isClone ? 'เธชเธฃเนเธฒเธเนเธซเธกเน' : po.poNo;
+      ? `สร้าง PO คู่ (กลุ่ม ${po.grpRef || ''})`
+      : 'แก้ไข PO';
+    document.getElementById('poFormBreadcrumb').textContent = isClone ? 'สร้างใหม่' : po.poNo;
     document.getElementById('editPONo').value          = isClone ? '' : po.poNo;
     document.getElementById('poNo').value              = isClone ? '' : po.poNo;
     document.getElementById('poShopName').value        = po.shopName    || '';
@@ -1402,7 +1403,7 @@ function showPOForm(po = null, options = {}) {
       if (autoBadge) autoBadge.style.display = 'none';
       if (clearBtn)  clearBtn.style.display  = (po.quoteNo ? '' : 'none');
     }
-    if (grpDisplay) grpDisplay.textContent = po.grpRef ? `\uD83D\uDD17 เธฃเธซเธฑเธชเธเธฅเธธเนเธก: ${po.grpRef}` : '';
+    if (grpDisplay) grpDisplay.textContent = po.grpRef ? `🔗 รหัสกลุ่ม: ${po.grpRef}` : '';
 
     if (!isClone) {
       document.getElementById('poStatusCard').style.cssText = '';
@@ -1419,8 +1420,8 @@ function showPOForm(po = null, options = {}) {
       renderPOItems();
     }
   } else {
-    document.getElementById('poFormTitle').textContent = 'เธชเธฃเนเธฒเธ PO เนเธซเธกเน';
-    document.getElementById('poFormBreadcrumb').textContent = 'เนเธซเธกเน';
+    document.getElementById('poFormTitle').textContent = 'สร้าง PO ใหม่';
+    document.getElementById('poFormBreadcrumb').textContent = 'ใหม่';
     document.getElementById('editPONo').value = '';
     document.getElementById('poNo').value = '';
     document.getElementById('poGrpRef').value = '';
@@ -1456,9 +1457,9 @@ function clearQuoteNo() {
 
 function createLinkedPO() {
   const poNo = document.getElementById('editPONo').value;
-  if (!poNo) { showToast('warning', 'เธเธฃเธธเธ“เธฒเธเธฑเธเธ—เธถเธ PO เธเนเธญเธ'); return; }
+  if (!poNo) { showToast('warning', 'กรุณาบันทึก PO ก่อน'); return; }
   const sourcePO = allPOs.find(p => p.poNo === poNo);
-  if (!sourcePO) { showToast('error', 'เนเธกเนเธเธเธเนเธญเธกเธนเธฅ PO'); return; }
+  if (!sourcePO) { showToast('error', 'ไม่พบข้อมูล PO'); return; }
   showPOForm(sourcePO, { cloneFrom: true });
 }
 
@@ -1471,7 +1472,7 @@ function editPO(poNo) {
 }
 
 function renderPOStepper(currentStatus) {
-  const steps = ['เธฃเธญเธญเธเธธเธกเธฑเธ•เธด', 'เธญเธเธธเธกเธฑเธ•เธดเนเธฅเนเธง', 'เธฃเธฑเธเธเธญเธเนเธฅเนเธง'];
+  const steps = ['รออนุมัติ', 'อนุมัติแล้ว', 'รับของแล้ว'];
   const icons = ['hourglass', 'check', 'check-circle'];
   const curIdx = steps.indexOf(currentStatus);
   document.getElementById('poStepperForm').innerHTML = steps.map((s, i) => {
@@ -1484,7 +1485,7 @@ function renderPOStepper(currentStatus) {
 }
 
 function addPOItem() {
-  poItemRows.push({ partName: '', qty: 1, unit: 'เธเธดเนเธ', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
+  poItemRows.push({ partName: '', qty: 1, unit: 'ชิ้น', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
   renderPOItems();
 }
 
@@ -1498,36 +1499,36 @@ function renderPOItems() {
   const tbody = document.getElementById('poItemsBody');
   tbody.closest('table').classList.add('table-card-mobile');
   if (!poItemRows.length) {
-    tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">เธขเธฑเธเนเธกเนเธกเธตเธฃเธฒเธขเธเธฒเธฃ</td></tr>';
+    tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">ยังไม่มีรายการ</td></tr>';
     return;
   }
   tbody.innerHTML = poItemRows.map((p, i) => `
     <tr>
-      <td data-label="เธฅเธณเธ”เธฑเธ" class="text-muted">${i + 1}</td>
-      <td data-label="เธญเธฐเนเธซเธฅเน">
+      <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
+      <td data-label="อะไหล่">
         <div class="input-group input-group-sm">
-          <input type="text" class="form-control" value="${p.partName || ''}" onchange="poItemRows[${i}].partName=this.value" placeholder="เธเธทเนเธญเธญเธฐเนเธซเธฅเน">
-          <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เน€เธฅเธทเธญเธเธเธฒเธ Stock"><i class="bi bi-search"></i></button>
+          <input type="text" class="form-control" value="${p.partName || ''}" onchange="poItemRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
+          <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
         </div>
         <input type="text" class="form-control form-control-sm mt-1"
           value="${p.note || ''}"
           onchange="poItemRows[${i}].note=this.value"
-          placeholder="\uD83D\uDCDD เธซเธกเธฒเธขเน€เธซเธ•เธธ (เน€เธเนเธ เนเธเนเธเธฑเธเธฃเธ– 30-4554)..."
+          placeholder="📝 หมายเหตุ (เช่น ใช้กับรถ 30-4554)..."
           style="font-size:11px;color:#6b7280;border-style:dashed">
       </td>
-      <td data-label="เธเธณเธเธงเธ">
+      <td data-label="จำนวน">
         <input type="number" class="form-control form-control-sm" value="${p.qty}" min="0" step="0.01" onchange="poItemRows[${i}].qty=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="เธซเธเนเธงเธข">
+      <td data-label="หน่วย">
         <input type="text" class="form-control form-control-sm" value="${p.unit}" onchange="poItemRows[${i}].unit=this.value">
       </td>
-      <td data-label="เธฃเธฒเธเธฒ/เธซเธเนเธงเธข">
+      <td data-label="ราคา/หน่วย">
         <input type="number" class="form-control form-control-sm" value="${p.pricePerUnit}" min="0" step="0.01" onchange="poItemRows[${i}].pricePerUnit=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="เธชเนเธงเธเธฅเธ”">
+      <td data-label="ส่วนลด">
         <input type="number" class="form-control form-control-sm" value="${p.discount}" min="0" step="0.01" onchange="poItemRows[${i}].discount=parseFloat(this.value)||0;calcPOItemAmount(${i})">
       </td>
-      <td data-label="เธเธณเธเธงเธเน€เธเธดเธ">
+      <td data-label="จำนวนเงิน">
         <span id="poAmt_${i}" class="fw-semibold">${fmtNum(p.amount)}</span>
       </td>
       <td data-label="">
@@ -1537,7 +1538,6 @@ function renderPOItems() {
       </td>
     </tr>`).join('');
 }
-
 
 function calcPOItemAmount(idx) {
   const p = poItemRows[idx];
