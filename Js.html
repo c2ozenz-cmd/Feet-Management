@@ -1,4 +1,4 @@
-﻿<script>
+<script>
 // ============================================================
 // Js.html — Bus Repair System Frontend Logic
 // ============================================================
@@ -1455,6 +1455,116 @@ function clearQuoteNo() {
   if (clearBtn)  clearBtn.style.display  = 'none';
 }
 
+function savePO() {
+
+  const po = {
+    poNo         : document.getElementById('editPONo').value,
+    shopName     : document.getElementById('poShopName').value,
+    shopAddress  : document.getElementById('poShopAddress').value,
+    taxId        : document.getElementById('poTaxId').value,
+    issueDate    : document.getElementById('poIssueDate').value,
+    quoteDate    : document.getElementById('poQuoteDate').value,
+    quoteNo      : document.getElementById('poQuoteNo').value,
+    refRepairNo  : document.getElementById('poRefRepairNo').value,
+    plate        : document.getElementById('poPlate').value,
+    vatType      : document.getElementById('poVatType').value,
+    grpRef       : (document.getElementById('poGrpRef') ? document.getElementById('poGrpRef').value : ''),
+    createdBy    : currentUser?.name || '',
+    createdBySignatureUrl : currentUser?.signatureUrl || ''
+  };
+
+  if (!po.shopName || !po.plate || !po.issueDate) {
+    showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
+    return;
+  }
+
+  const isNewPO = !po.poNo;
+  showLoading('กำลังบันทึก...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (res.success) {
+        showToast('success', 'บันทึก PO เรียบร้อย');
+
+        // อัปเดต grpRef ใน hidden field
+        const grpEl = document.getElementById('poGrpRef');
+        if (grpEl && res.grpRef) grpEl.value = res.grpRef;
+
+        loadPOs();
+
+        // สร้าง PDF อัตโนมัติ
+        showLoading('กำลังสร้าง PDF...');
+        google.script.run
+          .withSuccessHandler(pdfRes => {
+            Swal.close();
+            if (isNewPO) {
+              // ถาม PO คู่เฉพาะ PO ใหม่
+              Swal.fire({
+                icon: pdfRes.success ? 'success' : 'warning',
+                title: 'บันทึก PO เรียบร้อย',
+                html: `
+                  <div class="text-start">
+                    <p>ใบสั่งซื้อ <b>${res.poNo}</b> บันทึกเรียบร้อย${pdfRes.success ? ' และสร้าง PDF สำเร็จ' : ''}</p>
+                    <p class="mb-2 text-muted" style="font-size:12px">🔗 รหัสกลุ่ม: <b>${res.grpRef || '—'}</b></p>
+                    <hr class="my-2">
+                    <p class="mb-0">ใบเสร็จ/ใบเสนอราคาใบนี้ มีรถหลายคันไหม?<br>
+                    <span class="text-muted small">ถ้าใช่ กด "สร้าง PO คู่" เพื่อเปิด PO อีกใบสำหรับทะเบียนรถอีกคัน</span></p>
+                  </div>`,
+                showCancelButton: true,
+                confirmButtonText: '📋 สร้าง PO คู่',
+                cancelButtonText: 'ไม่ ขอบคุณ',
+                confirmButtonColor: '#10b981',
+                cancelButtonColor: '#6B7280'
+              }).then(r => {
+                if (r.isConfirmed) {
+                  // โหลด PO ใหม่ล่าสุดแล้วเปิด clone form
+                  google.script.run.withSuccessHandler(pos => {
+                    allPOs = pos || [];
+                    const savedPO = allPOs.find(p => p.poNo === res.poNo);
+                    if (savedPO) {
+                      showPOForm(savedPO, { cloneFrom: true });
+                    } else {
+                      showPOList();
+                    }
+                  }).getPOs();
+                } else {
+                  showPOList();
+                }
+              });
+            } else {
+              // แก้ไข PO เดิม — แสดง alert ธรรมดา
+              Swal.fire({
+                icon: pdfRes.success ? 'success' : 'warning',
+                title: 'บันทึก PO เรียบร้อย',
+                text: pdfRes.success
+                  ? `บันทึก PO ${res.poNo} และสร้าง PDF สำเร็จ`
+                  : `บันทึก PO ${res.poNo} สำเร็จ แต่สร้าง PDF ไม่สำเร็จ: ${pdfRes.message || ''}`,
+                confirmButtonColor: '#3B82F6'
+              }).then(() => showPOList());
+            }
+          })
+          .withFailureHandler(err => {
+            Swal.close();
+            Swal.fire({
+              icon: 'warning',
+              title: 'บันทึก PO เรียบร้อย',
+              text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้าง PDF ล้มเหลว: ${err.message}`,
+              confirmButtonColor: '#3B82F6'
+            }).then(() => showPOList());
+          })
+          .generateAndSavePOPdf(res.poNo);
+
+      } else {
+        showToast('error', res.message);
+      }
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', 'เกิดข้อผิดพลาด: ' + err.message);
+    })
+    .savePO(po, poItemRows);
+}
+
 function createLinkedPO() {
   const poNo = document.getElementById('editPONo').value;
   if (!poNo) { showToast('warning', 'กรุณาบันทึก PO ก่อน'); return; }
@@ -1557,76 +1667,6 @@ function calcPOTotal() {
   document.getElementById('poVatAmount').textContent = fmtNum(vat);
   document.getElementById('poGrandTotal').textContent = fmtNum(grand);
   document.getElementById('poVatRow').style.display = vatType !== 'none' ? '' : 'none';
-}
-
-function savePO() {
-
-  const po = {
-    poNo         : document.getElementById('editPONo').value,
-    shopName     : document.getElementById('poShopName').value,
-    shopAddress  : document.getElementById('poShopAddress').value,
-    taxId        : document.getElementById('poTaxId').value,
-    issueDate    : document.getElementById('poIssueDate').value,
-    quoteDate    : document.getElementById('poQuoteDate').value,
-    quoteNo      : document.getElementById('poQuoteNo').value,
-    refRepairNo  : document.getElementById('poRefRepairNo').value,
-    plate        : document.getElementById('poPlate').value,
-    vatType      : document.getElementById('poVatType').value,
-    createdBy    : currentUser?.name || '',
-    createdBySignatureUrl : currentUser?.signatureUrl || ''
-  };
-  
-  if (!po.shopName || !po.plate || !po.issueDate) {
-    showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
-    return;
-  }
-  showLoading('กำลังบันทึก...');
-  google.script.run
-    // ใน .withSuccessHandler ของ savePO() แทนที่โค้ดเดิม
-.withSuccessHandler(res => {
-        Swal.close();
-        if (res.success) {
-          showToast('success', 'บันทึก PO เรียบร้อย');
-          loadPOs();
-          showPOList();
-
-          // ── สร้าง PDF อัตโนมัติ ──
-          showLoading('กำลังสร้าง PDF...');
-          google.script.run
-            .withSuccessHandler(pdfRes => {
-              Swal.close();
-              if (pdfRes.success) {
-                Swal.fire({
-                  icon: 'success',
-                  title: 'บันทึก PO และสร้าง PDF เรียบร้อย',
-                  text: `ใบสั่งซื้อ PO ${res.poNo} ได้รับการบันทึกและสร้าง PDF สำเร็จ`,
-                  confirmButtonColor: '#3B82F6'
-                });
-              } else {
-                Swal.fire({
-                  icon: 'warning',
-                  title: 'บันทึก PO เรียบร้อย',
-                  text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้างไฟล์ PDF ไม่สำเร็จ: ${pdfRes.message || ''}`,
-                  confirmButtonColor: '#3B82F6'
-                });
-              }
-            })
-            .withFailureHandler(err => {
-              Swal.close();
-              Swal.fire({
-                icon: 'warning',
-                title: 'บันทึก PO เรียบร้อย',
-                text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้างไฟล์ PDF ล้มเหลว: ${err.message}`,
-                confirmButtonColor: '#3B82F6'
-              });
-            })
-            .generateAndSavePOPdf(res.poNo);
-
-        } else {
-          showToast('error', res.message);
-        }
-      })
-    .savePO(po, poItemRows);
 }
 
 function changePOStatus(status) {
