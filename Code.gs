@@ -562,9 +562,24 @@ function getPOItems(poNo) {
     return data.slice(1).filter(r => r[0] === poNo).map(r => ({
       poNo: r[0], partName: r[2], qty: r[3],
       unit: r[4], pricePerUnit: r[5], discount: r[6], amount: r[7],
-      note: String(r[8] || '')   // ← เพิ่ม
+      note: String(r[8] || '')   // Log note
     }))
   } catch (e) { return []; }
+}
+
+function getPoPdfBase64(poNo) {
+  try {
+    const pos = getPOs();
+    const po  = pos.find(p => p.poNo === poNo);
+    if (!po || !po.pdfUrl) return null;
+    const match = po.pdfUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || po.pdfUrl.match(/id=([a-zA-Z0-9_-]+)/);
+    if (!match) return null;
+    const file = DriveApp.getFileById(match[1]);
+    const bytes = file.getBlob().getBytes();
+    return Utilities.base64Encode(bytes);
+  } catch (e) {
+    return null;
+  }
 }
 
 function savePO(po, items) {

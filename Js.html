@@ -10,6 +10,9 @@ let allPOs = [];
 let currentPOList = [];
 let selectedPONos = new Set();
 let poSortMode = 'poNoDesc';
+let poPageSize = 15;
+let poCurrentPage = 1;
+let filteredPOsList = [];
 let currentPrintPONos = [];
 let allStock = [];
 let allBuses = [];
@@ -1056,6 +1059,24 @@ function loadPOs() {
   }).getShops();
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
+    
+    // ตั้งค่าตัวเลือกเดือนเริ่มต้นเป็นเดือนล่าสุดที่มีข้อมูล PO เพื่อการแสดงผลที่ตอบโจทย์
+    if (allPOs.length > 0) {
+      let latestMonth = '';
+      allPOs.forEach(p => {
+        if (p.issueDate && p.issueDate.length >= 7) {
+          const m = p.issueDate.substring(0, 7); // YYYY-MM
+          if (!latestMonth || m > latestMonth) {
+            latestMonth = m;
+          }
+        }
+      });
+      const monthInput = document.getElementById('poMonthFilter');
+      if (monthInput && !monthInput.value) {
+        monthInput.value = latestMonth || currentMonthISO();
+      }
+    }
+    
     filterPOs();
   }).getPOs();
   loadBusPlates();
@@ -1127,16 +1148,29 @@ function renderPOTable(pos) {
   const tbody = document.getElementById('poTableBody');
   tbody.closest('table').classList.add('table-card-mobile');
   currentPOList = sortPOList(pos);
-  if (!pos.length) {
+  
+  const totalItems = currentPOList.length;
+  if (!totalItems) {
     tbody.innerHTML = `<tr><td colspan="9" data-label=""><div class="empty-state"><i class="bi bi-file-earmark-text"></i>ยังไม่มี PO</div></td></tr>`;
+    const infoEl = document.getElementById('poPaginationInfo');
+    if (infoEl) infoEl.textContent = 'แสดง 0 ถึง 0 จาก 0 รายการ';
+    const pagList = document.getElementById('poPaginationList');
+    if (pagList) pagList.innerHTML = '';
     syncPOBulkActions();
     return;
   }
   
-  tbody.innerHTML = currentPOList.map(p => {
+  const totalPages = Math.ceil(totalItems / poPageSize) || 1;
+  if (poCurrentPage > totalPages) poCurrentPage = totalPages;
+  if (poCurrentPage < 1) poCurrentPage = 1;
+  
+  const startIdx = (poCurrentPage - 1) * poPageSize;
+  const endIdx = startIdx + poPageSize;
+  const paginatedPOs = currentPOList.slice(startIdx, endIdx);
+  
+  tbody.innerHTML = paginatedPOs.map(p => {
     const checked = selectedPONos.has(p.poNo) ? 'checked' : '';
     const canSelect = currentUser?.role === 'admin';
-    // แสดง GRP badge ถ้ามี grpRef และมี PO อื่นในกลุ่มเดียวกัน
     const grpSiblings = p.grpRef ? currentPOList.filter(x => x.grpRef === p.grpRef && x.poNo !== p.poNo) : [];
     const grpBadge = (p.grpRef && grpSiblings.length > 0)
       ? `<div style="font-size:10px;margin-top:2px"><span class="badge" style="background:rgba(99,102,241,0.13);color:#6366f1;font-weight:500">🔗 ${p.grpRef}</span></div>`
@@ -1169,18 +1203,64 @@ function renderPOTable(pos) {
       </td>
     </tr>`;
   }).join('');
+  
+  // อัปเดตข้อมูล Pagination UI
+  const infoEl = document.getElementById('poPaginationInfo');
+  if (infoEl) {
+    infoEl.textContent = `แสดง ${startIdx + 1} ถึง ${Math.min(endIdx, totalItems)} จาก ${totalItems} รายการ`;
+  }
+  
+  const pagList = document.getElementById('poPaginationList');
+  if (pagList) {
+    let html = '';
+    // ปุ่มย้อนกลับ
+    html += `<li class="page-item ${poCurrentPage === 1 ? 'disabled' : ''}">
+      <a class="page-link" href="#" onclick="changePOPage(${poCurrentPage - 1}); return false;"><i class="bi bi-chevron-left"></i></a>
+    </li>`;
+    
+    // เลขหน้า (แสดงสูงสุด 5 หน้า รอบ ๆ หน้าปัจจุบัน)
+    const maxPages = 5;
+    let startPage = Math.max(1, poCurrentPage - 2);
+    let endPage = Math.min(totalPages, startPage + maxPages - 1);
+    if (endPage - startPage + 1 < maxPages) {
+      startPage = Math.max(1, endPage - maxPages + 1);
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+      html += `<li class="page-item ${poCurrentPage === i ? 'active' : ''}">
+        <a class="page-link" href="#" onclick="changePOPage(${i}); return false;">${i}</a>
+      </li>`;
+    }
+    
+    // ปุ่มถัดไป
+    html += `<li class="page-item ${poCurrentPage === totalPages ? 'disabled' : ''}">
+      <a class="page-link" href="#" onclick="changePOPage(${poCurrentPage + 1}); return false;"><i class="bi bi-chevron-right"></i></a>
+    </li>`;
+    
+    pagList.innerHTML = html;
+  }
+  
   syncPOBulkActions();
+}
+
+function changePOPage(page) {
+  poCurrentPage = page;
+  renderPOTable(filteredPOsList);
 }
 
 function filterPOs() {
   const q = document.getElementById('poSearch').value.toLowerCase();
   const s = document.getElementById('poStatusFilter').value;
   const m = document.getElementById('poMonthFilter').value;
-  renderPOTable(allPOs.filter(p =>
+  
+  filteredPOsList = allPOs.filter(p =>
     (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.grpRef || '').toLowerCase().includes(q)) &&
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
-  ));
+  );
+  
+  poCurrentPage = 1; // รีเซ็ตกลับเป็นหน้า 1 เสมอเมื่อฟิลเตอร์เปลี่ยน
+  renderPOTable(filteredPOsList);
 }
 
 function togglePOSelection(poNo, checked) {
@@ -1900,11 +1980,79 @@ function previewPO() {
 }
 
 
+function getDirectPdfUrl(url) {
+  if (!url) return '';
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+  if (match) {
+    // ⚡ แปลงเป็นหน้าตัวอย่าง (preview) เพื่อให้แสดงผลบนบราวเซอร์ทันทีโดยไม่โหลดไฟล์ลงเครื่อง
+    return 'https://drive.google.com/file/d/' + match[1] + '/preview';
+  }
+  return url;
+}
+
 function previewPOFromNo(poNo) {
   document.getElementById('editPONo').value = poNo;
   currentPrintPONos = [poNo];
   const po = allPOs.find(p => p.poNo === poNo);
   if (!po) return;
+
+  // 🔗 หากมีไฟล์ PDF อยู่ใน Google Drive แล้ว ให้ดึงข้อมูลมาสั่งพิมพ์ผ่านบราวเซอร์ทันที (1-Click Print)
+  if (po.pdfUrl) {
+    showLoading('กำลังส่งไฟล์ไปยังเครื่องพิมพ์...');
+    google.script.run
+      .withSuccessHandler(base64 => {
+        Swal.close();
+        if (!base64) {
+          showToast('error', 'ไม่พบไฟล์ PDF ต้นฉบับบนระบบคลาวด์');
+          return;
+        }
+
+        // ค้นหาหรือสร้าง Iframe สำหรับการพิมพ์แบบเงียบ
+        let iframe = document.getElementById('poSilentPrintFrame');
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = 'poSilentPrintFrame';
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = 'none';
+          document.body.appendChild(iframe);
+        }
+
+        // แปลง Base64 เป็น Blob URL
+        const byteCharacters = atob(base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // โหลด PDF ลงใน Iframe และสั่งพิมพ์อัตโนมัติ
+        iframe.src = blobUrl;
+        iframe.onload = () => {
+          setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+          }, 300);
+        };
+
+        // บันทึกสถานะการพิมพ์
+        google.script.run
+          .withSuccessHandler(() => loadPOs())
+          .markPOAsPrinted(poNo);
+      })
+      .withFailureHandler(e => {
+        Swal.close();
+        showToast('error', 'เกิดข้อผิดพลาด: ' + e.message);
+      })
+      .getPoPdfBase64(poNo);
+    return;
+  }
+
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
   google.script.run
     .withSuccessHandler(result => {
@@ -2201,8 +2349,16 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
   if (options.returnHtml) return pages;
 
   currentPrintPONos = po?.poNo ? [po.poNo] : [];
-  document.getElementById('printPreview').innerHTML =
-    `<div id="poPrintDoc" style="font-family:'Sarabun',sans-serif;font-size:12px;color:#000">${pages}</div>`;
+  
+  // คืนค่ารูปแบบของพรีวิว และแสดงปุ่มพิมพ์ของ Modal สำหรับพรีวิวแบบร่าง HTML
+  const previewEl = document.getElementById('printPreview');
+  if (previewEl) {
+    previewEl.style.padding = '32px';
+    previewEl.innerHTML = `<div id="poPrintDoc" style="font-family:'Sarabun',sans-serif;font-size:12px;color:#000">${pages}</div>`;
+  }
+
+  const footerBtn = document.querySelector('#printModalFooter .btn-primary');
+  if (footerBtn) footerBtn.style.display = '';
 
   new bootstrap.Modal(document.getElementById('printModal')).show();
 }
@@ -2210,6 +2366,76 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
 function printPO() {
   const el = document.getElementById('poPrintDoc');
   if (!el) return;
+
+  let printedNos = currentPrintPONos.filter(poNo => poNo && poNo !== 'PREVIEW' && poNo !== 'BULK');
+  if (!printedNos.length) {
+    const poNo = document.getElementById('editPONo').value;
+    if (poNo && poNo !== 'PREVIEW' && poNo !== 'BULK') printedNos = [poNo];
+  }
+
+  // 🔗 หากเป็นการพิมพ์แบบใบเดียว และมีไฟล์ PDF อยู่ใน Drive ให้สั่งพิมพ์โดยตรง
+  if (printedNos.length === 1) {
+    const targetPoNo = printedNos[0];
+    const po = allPOs.find(p => p.poNo === targetPoNo);
+    if (po && po.pdfUrl) {
+      // ปิด modal เก่าก่อน
+      const modalEl = document.getElementById('printModal');
+      if (modalEl) {
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+      }
+
+      showLoading('กำลังส่งไฟล์ไปยังเครื่องพิมพ์...');
+      google.script.run
+        .withSuccessHandler(base64 => {
+          Swal.close();
+          if (!base64) {
+            showToast('error', 'ไม่พบไฟล์ PDF ต้นฉบับบนระบบคลาวด์');
+            return;
+          }
+
+          let iframe = document.getElementById('poSilentPrintFrame');
+          if (!iframe) {
+            iframe = document.createElement('iframe');
+            iframe.id = 'poSilentPrintFrame';
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = 'none';
+            document.body.appendChild(iframe);
+          }
+
+          const byteCharacters = atob(base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const blobUrl = URL.createObjectURL(blob);
+
+          iframe.src = blobUrl;
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow.focus();
+              iframe.contentWindow.print();
+            }, 300);
+          };
+
+          google.script.run
+            .withSuccessHandler(() => loadPOs())
+            .markPOAsPrinted(targetPoNo);
+        })
+        .withFailureHandler(e => {
+          Swal.close();
+          showToast('error', 'เกิดข้อผิดพลาด: ' + e.message);
+        })
+        .getPoPdfBase64(targetPoNo);
+      return;
+    }
+  }
 
   // แสดง loading
   Swal.fire({
@@ -2277,11 +2503,6 @@ function printPO() {
       </body></html>`);
       win.document.close();
 
-      let printedNos = currentPrintPONos.filter(poNo => poNo && poNo !== 'PREVIEW' && poNo !== 'BULK');
-      if (!printedNos.length) {
-        const poNo = document.getElementById('editPONo').value;
-        if (poNo && poNo !== 'PREVIEW' && poNo !== 'BULK') printedNos = [poNo];
-      }
       if (printedNos.length) {
         let done = 0;
         printedNos.forEach(poNo => {

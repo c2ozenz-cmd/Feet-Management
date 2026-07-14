@@ -220,13 +220,32 @@ function generateAndSavePOPdf(poNo) {
 
     const folder = DriveApp.getFolderById(folderId);
 
-    // ลบไฟล์เก่า
+    // ค้นหาไฟล์เก่าในโฟลเดอร์
     const existing = folder.getFilesByName(`PO_${po.poNo}.pdf`);
-    while (existing.hasNext()) {
-      existing.next().setTrashed(true);
+    let pdfFile;
+
+    if (existing.hasNext()) {
+      // 🔗 ถ้ามีไฟล์เดิมอยู่แล้ว ให้เขียนข้อมูลทับ (Overwrite) เพื่อรักษา Link เดิมไว้
+      pdfFile = existing.next();
+      const fileId = pdfFile.getId();
+      
+      const url = "https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media";
+      UrlFetchApp.fetch(url, {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer " + ScriptApp.getOAuthToken()
+        },
+        contentType: "application/pdf",
+        payload: pdfBlob.getBytes(),
+        muteHttpExceptions: true
+      });
+      Logger.log('Updated existing PDF file content. ID: ' + fileId);
+    } else {
+      // 🆕 ถ้ายังไม่มีไฟล์เดิม ให้สร้างใหม่ตามปกติ
+      pdfFile = folder.createFile(pdfBlob);
+      Logger.log('Created new PDF file. ID: ' + pdfFile.getId());
     }
 
-    const pdfFile = folder.createFile(pdfBlob);
     const pdfUrl  = pdfFile.getUrl();
 
     Logger.log('PDF URL: ' + pdfUrl);
