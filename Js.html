@@ -1981,13 +1981,7 @@ function previewPO() {
 
 
 function getDirectPdfUrl(url) {
-  if (!url) return '';
-  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
-  if (match) {
-    // ⚡ แปลงเป็นหน้าตัวอย่าง (preview) เพื่อให้แสดงผลบนบราวเซอร์ทันทีโดยไม่โหลดไฟล์ลงเครื่อง
-    return 'https://drive.google.com/file/d/' + match[1] + '/preview';
-  }
-  return url;
+  return url || '';
 }
 
 function previewPOFromNo(poNo) {
