@@ -48,7 +48,19 @@ function doPost(e) {
 
     events.forEach(event => {
       if (event.type === 'postback') {
-        handlePostback(event);
+        try {
+          handlePostback(event);
+        } catch (postbackErr) {
+          logLineWorkflow('postback_unhandled_error', {
+            message: postbackErr.message,
+            stack: postbackErr.stack,
+            data: event.postback && event.postback.data,
+            source: event.source || {}
+          });
+          if (event.replyToken) {
+            replyLineMessage(event.replyToken, 'เกิดข้อผิดพลาดระหว่างอนุมัติ กรุณาตรวจสอบ LineDebugLog');
+          }
+        }
 
       } else if (event.type === 'message' && event.message.type === 'text') {
         const lineUserId = event.source.userId;
@@ -141,6 +153,10 @@ function doPost(e) {
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch(err) {
+    logLineWorkflow('doPost_error', {
+      message: err.message,
+      stack: err.stack
+    });
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'error' }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -157,6 +173,14 @@ function handlePostback(event) {
   const action = params.action;
   const type   = params.type;
   const id     = params.id;
+
+  logLineWorkflow('postback_received', {
+    action,
+    type,
+    id,
+    lineUserId,
+    data
+  });
 
   // tech_done / tech_waiting / tech_report ไม่ต้องเช็คสิทธิ์ admin
   if (['tech_done', 'tech_waiting', 'tech_report'].includes(action)) {
@@ -206,6 +230,7 @@ function handlePostback(event) {
   }
   // ── เช็คสิทธิ์ admin สำหรับ approve/reject ──
   if (!isLineUserAllowed(lineUserId, 'admin')) {
+    logLineWorkflow('approval_permission_denied', { action, type, id, lineUserId });
     replyLineMessage(replyToken,
       '⛔ คุณไม่มีสิทธิ์อนุมัติรายการนี้\nกรุณาติดต่อผู้ดูแลระบบ'
     );
@@ -221,6 +246,7 @@ function handlePostback(event) {
     const repair    = repairs.find(r => r.repairNo === id);
     const curStatus = repair?.status || '';
     if (curStatus !== 'รอดำเนินการ') {
+      logLineWorkflow('repair_invalid_status', { id, curStatus, lineUserId });
       const alreadyDone = ['กำลังซ่อม','รออะไหล่','เสร็จแล้ว'].includes(curStatus);
       replyLineMessage(replyToken,
         alreadyDone
@@ -231,15 +257,33 @@ function handlePostback(event) {
     }
     if (action === 'approve') {
       const res = updateRepairStatus(id, 'กำลังซ่อม');
+      logLineWorkflow('repair_update_status_result', { id, success: res.success, message: res.message || '' });
       if (res.success) {
         saveApprovalInfo('repair', id, lineUserId);
         // ── ส่ง Flex ผลอนุมัติไปกลุ่ม (พร้อมปุ่มช่าง) — Reply ฟรี ──
         const plate   = repair?.plate || '';
         const flexMsg = buildApprovalResultFlex('repair', id, approverName, dateStr, plate);
         const replyRes = replyLineFlex(replyToken, flexMsg);
+        logLineWorkflow('repair_reply_result', {
+          id,
+          success: replyRes && replyRes.success,
+          code: replyRes && replyRes.code,
+          body: replyRes && replyRes.body,
+          message: replyRes && replyRes.message
+        });
         if (!replyRes || !replyRes.success) {
           const groupId = getLineGroupId('service');
-          if (groupId) pushLineFlex(groupId, flexMsg);
+          if (groupId) {
+            const pushRes = pushLineFlex(groupId, flexMsg);
+            logLineWorkflow('repair_push_fallback_result', {
+              id,
+              groupId,
+              success: pushRes && pushRes.success,
+              code: pushRes && pushRes.code,
+              body: pushRes && pushRes.body,
+              message: pushRes && pushRes.message
+            });
+          }
         }
       } else {
         replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
@@ -256,6 +300,7 @@ function handlePostback(event) {
     const po        = pos.find(p => p.poNo === id);
     const curStatus = po?.status || '';
     if (curStatus !== 'รออนุมัติ' && curStatus !== 'ออกPO') {
+      logLineWorkflow('po_invalid_status', { id, curStatus, lineUserId });
       replyLineMessage(replyToken,
         `⚠️ ไม่สามารถดำเนินการได้\n${id} สถานะปัจจุบัน: "${curStatus}" แล้ว`
       );
@@ -263,6 +308,7 @@ function handlePostback(event) {
     }
     if (action === 'approve') {
       const res = updatePOStatus(id, 'อนุมัติแล้ว');
+      logLineWorkflow('po_update_status_result', { id, success: res.success, message: res.message || '' });
       if (res.success) {
         saveApprovalInfo('po', id, lineUserId);
         const plate = po?.plate || '';
@@ -273,18 +319,45 @@ function handlePostback(event) {
         try {
           const pdfRes = generateAndSavePOPdf(id);
           pdfUrl = (pdfRes && pdfRes.success) ? pdfRes.pdfUrl : '';
+          logLineWorkflow('po_pdf_result', {
+            id,
+            success: pdfRes && pdfRes.success,
+            pdfUrl,
+            message: pdfRes && pdfRes.message
+          });
         } catch (pdfErr) {
           Logger.log('generateAndSavePOPdf error: ' + pdfErr.message);
+          logLineWorkflow('po_pdf_error', {
+            id,
+            message: pdfErr.message,
+            stack: pdfErr.stack
+          });
         }
 
         const flexMsg = buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl);
         const replyRes = replyLineFlex(replyToken, flexMsg);
+        logLineWorkflow('po_reply_result', {
+          id,
+          success: replyRes && replyRes.success,
+          code: replyRes && replyRes.code,
+          body: replyRes && replyRes.body,
+          message: replyRes && replyRes.message
+        });
         if (!replyRes || !replyRes.success) {
           const groupId = getLineGroupId('po');
           if (groupId) {
-            pushLineFlex(groupId, flexMsg);
+            const pushRes = pushLineFlex(groupId, flexMsg);
+            logLineWorkflow('po_push_fallback_result', {
+              id,
+              groupId,
+              success: pushRes && pushRes.success,
+              code: pushRes && pushRes.code,
+              body: pushRes && pushRes.body,
+              message: pushRes && pushRes.message
+            });
           } else {
             Logger.log('PO approval flex failed to send (reply failed, no groupId fallback): ' + id);
+            logLineWorkflow('po_push_fallback_missing_group', { id });
           }
         }
       } else {
@@ -984,6 +1057,33 @@ function logLineMessage(url, payload, responseCode) {
   }
 }
 
+function logLineWorkflow(stage, detail) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('LineDebugLog');
+    if (!sheet) {
+      sheet = ss.insertSheet('LineDebugLog');
+      sheet.appendRow(['Timestamp', 'Stage', 'Detail']);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#E2E8F0');
+    }
+
+    let text = '';
+    try {
+      text = JSON.stringify(detail || {});
+    } catch (jsonErr) {
+      text = String(detail || '');
+    }
+
+    sheet.appendRow([
+      new Date(),
+      stage,
+      text.length > 45000 ? text.substring(0, 45000) : text
+    ]);
+  } catch (e) {
+    Logger.log('logLineWorkflow error: ' + e.message);
+  }
+}
+
 function callLineAPI(url, payload, token) {
   try {
     const res = UrlFetchApp.fetch(url, {
@@ -994,14 +1094,29 @@ function callLineAPI(url, payload, token) {
       muteHttpExceptions: true
     });
     const code = res.getResponseCode();
+    const body = res.getContentText();
     
     // บันทึก Log การส่งข้อความ LINE
     logLineMessage(url, payload, code);
+    if (code !== 200) {
+      logLineWorkflow('line_api_failed', {
+        url,
+        code,
+        body,
+        messageType: payload && payload.messages && payload.messages[0] && payload.messages[0].type,
+        preview: payload && payload.messages && payload.messages[0] && (payload.messages[0].altText || payload.messages[0].text || '')
+      });
+    }
     
-    return { success: code === 200, code, body: res.getContentText() };
+    return { success: code === 200, code, body };
   } catch (e) {
     // บันทึก Log กรณีเกิด Error
     logLineMessage(url, payload, 'ERROR: ' + e.message);
+    logLineWorkflow('line_api_exception', {
+      url,
+      message: e.message,
+      stack: e.stack
+    });
     return { success: false, message: e.message };
   }
 }

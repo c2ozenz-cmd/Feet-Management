@@ -1996,60 +1996,25 @@ function previewPOFromNo(poNo) {
   const po = allPOs.find(p => p.poNo === poNo);
   if (!po) return;
 
-  // 🔗 หากมีไฟล์ PDF อยู่ใน Google Drive แล้ว ให้ดึงข้อมูลมาสั่งพิมพ์ผ่านบราวเซอร์ทันที (1-Click Print)
+  // 🔗 หากมีไฟล์ PDF อยู่ใน Google Drive แล้ว ให้เปิดลิงก์ PDF โดยตรงแทน เพื่อให้ได้ไฟล์ที่ตรงกับบอท
   if (po.pdfUrl) {
-    showLoading('กำลังส่งไฟล์ไปยังเครื่องพิมพ์...');
-    google.script.run
-      .withSuccessHandler(base64 => {
-        Swal.close();
-        if (!base64) {
-          showToast('error', 'ไม่พบไฟล์ PDF ต้นฉบับบนระบบคลาวด์');
-          return;
-        }
-
-        // ค้นหาหรือสร้าง Iframe สำหรับการพิมพ์แบบเงียบ
-        let iframe = document.getElementById('poSilentPrintFrame');
-        if (!iframe) {
-          iframe = document.createElement('iframe');
-          iframe.id = 'poSilentPrintFrame';
-          iframe.style.position = 'fixed';
-          iframe.style.right = '0';
-          iframe.style.bottom = '0';
-          iframe.style.width = '0';
-          iframe.style.height = '0';
-          iframe.style.border = 'none';
-          document.body.appendChild(iframe);
-        }
-
-        // แปลง Base64 เป็น Blob URL
-        const byteCharacters = atob(base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(blob);
-
-        // โหลด PDF ลงใน Iframe และสั่งพิมพ์อัตโนมัติ
-        iframe.src = blobUrl;
-        iframe.onload = () => {
-          setTimeout(() => {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-          }, 300);
-        };
-
-        // บันทึกสถานะการพิมพ์
-        google.script.run
-          .withSuccessHandler(() => loadPOs())
-          .markPOAsPrinted(poNo);
-      })
-      .withFailureHandler(e => {
-        Swal.close();
-        showToast('error', 'เกิดข้อผิดพลาด: ' + e.message);
-      })
-      .getPoPdfBase64(poNo);
+    const directUrl = getDirectPdfUrl(po.pdfUrl);
+    const win = window.open(directUrl, '_blank');
+    if (win) {
+      google.script.run
+        .withSuccessHandler(() => {
+          loadPOs();
+          showToast('success', 'เปิดไฟล์ PDF ต้นฉบับและบันทึกสถานะพิมพ์แล้ว');
+        })
+        .markPOAsPrinted(poNo);
+    } else {
+      Swal.fire({
+        icon: 'warning',
+        title: 'ไม่สามารถเปิดหน้าต่างได้',
+        text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ เพื่อเปิดไฟล์ PDF',
+        confirmButtonText: 'รับทราบ'
+      });
+    }
     return;
   }
 
@@ -2373,66 +2338,34 @@ function printPO() {
     if (poNo && poNo !== 'PREVIEW' && poNo !== 'BULK') printedNos = [poNo];
   }
 
-  // 🔗 หากเป็นการพิมพ์แบบใบเดียว และมีไฟล์ PDF อยู่ใน Drive ให้สั่งพิมพ์โดยตรง
+  // 🔗 หากเป็นการพิมพ์แบบใบเดียว และมีไฟล์ PDF อยู่ใน Drive ให้เปิดลิงก์ PDF โดยตรง
   if (printedNos.length === 1) {
     const targetPoNo = printedNos[0];
     const po = allPOs.find(p => p.poNo === targetPoNo);
     if (po && po.pdfUrl) {
-      // ปิด modal เก่าก่อน
-      const modalEl = document.getElementById('printModal');
-      if (modalEl) {
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) modal.hide();
+      const directUrl = getDirectPdfUrl(po.pdfUrl);
+      const win = window.open(directUrl, '_blank');
+      if (!win) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'ไม่สามารถเปิดหน้าต่างได้',
+          text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ เพื่อเปิดไฟล์ PDF',
+          confirmButtonText: 'รับทราบ'
+        });
+        return;
       }
-
-      showLoading('กำลังส่งไฟล์ไปยังเครื่องพิมพ์...');
+      // อัปเดตสถานะการพิมพ์
       google.script.run
-        .withSuccessHandler(base64 => {
-          Swal.close();
-          if (!base64) {
-            showToast('error', 'ไม่พบไฟล์ PDF ต้นฉบับบนระบบคลาวด์');
-            return;
+        .withSuccessHandler(() => {
+          loadPOs();
+          const modalEl = document.getElementById('printModal');
+          if (modalEl) {
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
           }
-
-          let iframe = document.getElementById('poSilentPrintFrame');
-          if (!iframe) {
-            iframe = document.createElement('iframe');
-            iframe.id = 'poSilentPrintFrame';
-            iframe.style.position = 'fixed';
-            iframe.style.right = '0';
-            iframe.style.bottom = '0';
-            iframe.style.width = '0';
-            iframe.style.height = '0';
-            iframe.style.border = 'none';
-            document.body.appendChild(iframe);
-          }
-
-          const byteCharacters = atob(base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const blobUrl = URL.createObjectURL(blob);
-
-          iframe.src = blobUrl;
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow.focus();
-              iframe.contentWindow.print();
-            }, 300);
-          };
-
-          google.script.run
-            .withSuccessHandler(() => loadPOs())
-            .markPOAsPrinted(targetPoNo);
+          showToast('success', 'เปิดไฟล์ PDF ต้นฉบับและบันทึกสถานะพิมพ์แล้ว');
         })
-        .withFailureHandler(e => {
-          Swal.close();
-          showToast('error', 'เกิดข้อผิดพลาด: ' + e.message);
-        })
-        .getPoPdfBase64(targetPoNo);
+        .markPOAsPrinted(targetPoNo);
       return;
     }
   }

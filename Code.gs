@@ -567,21 +567,6 @@ function getPOItems(poNo) {
   } catch (e) { return []; }
 }
 
-function getPoPdfBase64(poNo) {
-  try {
-    const pos = getPOs();
-    const po  = pos.find(p => p.poNo === poNo);
-    if (!po || !po.pdfUrl) return null;
-    const match = po.pdfUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || po.pdfUrl.match(/id=([a-zA-Z0-9_-]+)/);
-    if (!match) return null;
-    const file = DriveApp.getFileById(match[1]);
-    const bytes = file.getBlob().getBytes();
-    return Utilities.base64Encode(bytes);
-  } catch (e) {
-    return null;
-  }
-}
-
 function savePO(po, items) {
   try {
     const poSheet    = getSheet('po');
