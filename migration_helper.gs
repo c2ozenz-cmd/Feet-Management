@@ -147,6 +147,19 @@ function uploadDriveFileToSupabase(fileId, bucket, destName) {
   }
 }
 
+function updateSheetCell(sheetName, rowIndex, colIndex, value) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet) {
+      sheet.getRange(rowIndex + 2, colIndex + 1).setValue(value);
+    }
+  } catch (e) {
+    Logger.log(`⚠️ Warning: Could not update sheet cell in ${sheetName} at row ${rowIndex+2}: ${e.message}`);
+  }
+}
+
+
 // ── TABLE MIGRATORS (INDEX-BASED COLUMN MAPPING) ──
 
 function migrateSettings() {
@@ -219,7 +232,7 @@ function migrateProfiles() {
   const rows = getSheetData("Users") || [];
   if (rows.length === 0) return;
   
-  const payload = rows.map(r => {
+  const payload = rows.map((r, idx) => {
     const username = String(r[1] || '').trim();
     let signatureUrl = String(r[7] || '');
     
@@ -231,6 +244,7 @@ function migrateProfiles() {
         const newUrl = uploadDriveFileToSupabase(fileId, "signatures", `sig-${username}.png`);
         if (newUrl) {
           signatureUrl = newUrl;
+          updateSheetCell("Users", idx, 7, newUrl);
           Logger.log(`✅ Signature migrated successfully: ${newUrl}`);
         }
       }
@@ -298,7 +312,7 @@ function migratePurchaseOrders(validRepairNos, validPlates) {
   const rows = getSheetData("PurchaseOrders") || [];
   if (rows.length === 0) return;
   
-  const payload = rows.map(r => {
+  const payload = rows.map((r, idx) => {
     const poNo = String(r[0] || '').trim();
     const rawRepNo = String(r[6] || '').trim();
     const refRepairNo = validRepairNos.has(rawRepNo) ? rawRepNo : null;
@@ -314,6 +328,7 @@ function migratePurchaseOrders(validRepairNos, validPlates) {
         const newUrl = uploadDriveFileToSupabase(fileId, "pdf-orders", `po-${poNo}.pdf`);
         if (newUrl) {
           pdfUrl = newUrl;
+          updateSheetCell("PurchaseOrders", idx, 17, newUrl);
           Logger.log(`✅ PDF migrated successfully: ${newUrl}`);
         }
       }
@@ -328,6 +343,7 @@ function migratePurchaseOrders(validRepairNos, validPlates) {
         const newUrl = uploadDriveFileToSupabase(fileId, "signatures", `sig-po-${poNo}.png`);
         if (newUrl) {
           createdBySigUrl = newUrl;
+          updateSheetCell("PurchaseOrders", idx, 13, newUrl);
         }
       }
     }
