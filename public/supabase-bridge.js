@@ -46,20 +46,20 @@
     // ── AUTH / LOGIN ──
     async login(username, password) {
       try {
-        const email = username.includes('@') ? username : `${username}@mungkung.com`;
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: email,
-          password: password
-        });
-        if (authError) throw authError;
-
-        // Fetch custom profile data
-        const { data: profile, error: profError } = await supabase
+        const { data: profile, error } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', authData.user.id)
+          .eq('username', username)
+          .eq('password', password)
           .single();
-        if (profError) throw profError;
+        
+        if (error || !profile) {
+          throw new Error('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        }
+
+        if (profile.status !== 'active') {
+          throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
+        }
 
         const user = {
           id: profile.id,
@@ -71,9 +71,11 @@
           signatureUrl: profile.signature_url
         };
 
+        window.currentUser = user; // Store globally for other operations
+
         this._ok({ success: true, user });
       } catch (err) {
-        this._ok({ success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง: ' + err.message });
+        this._ok({ success: false, message: err.message });
       }
     }
 
@@ -120,41 +122,37 @@
 
     async saveUser(user) {
       try {
-        // Since Supabase Auth handles signups, for new users we would normally call auth.signUp().
-        // For admin editing profiles, we update the public.profiles table.
+        const payload = {
+          username: user.username,
+          name: user.name,
+          status: user.status || 'active',
+          role: user.role || 'user',
+          line_user_id: user.lineUserId || '',
+          signature_url: user.signatureUrl || ''
+        };
+        
+        // If password is provided, save it too
+        if (user.password) {
+          payload.password = user.password;
+        }
+
         if (user.id) {
-          const { error } = await supabase.from('profiles').update({
-            username: user.username,
-            name: user.name,
-            status: user.status,
-            role: user.role,
-            line_user_id: user.lineUserId,
-            signature_url: user.signatureUrl
-          }).eq('id', user.id);
+          const { error } = await supabase.from('profiles').update(payload).eq('id', user.id);
           if (error) throw error;
           this._ok({ success: true });
         } else {
-          // Creating a new user via Supabase Auth from admin panel requires calling a Netlify Function 
-          // or registering using credentials. Let's redirect to a serverless sign-up flow.
-          const email = `${user.username}@mungkung.com`;
-          const res = await fetch('/.netlify/functions/admin-create-user', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...user, email })
-          });
-          const json = await res.json();
-          if (!res.ok) throw new Error(json.error || 'Failed to create user');
-          this._ok({ success: true, id: json.id });
+          const id = 'U' + Date.now();
+          const { error } = await supabase.from('profiles').insert({ id, ...payload });
+          if (error) throw error;
+          this._ok({ success: true, id });
         }
       } catch (err) { this._err(err); }
     }
 
     async deleteUser(id) {
       try {
-        // Deleting user requires calling admin API in Netlify
-        const res = await fetch(`/.netlify/functions/admin-delete-user?id=${id}`, { method: 'DELETE' });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to delete user');
+        const { error } = await supabase.from('profiles').delete().eq('id', id);
+        if (error) throw error;
         this._ok({ success: true });
       } catch (err) { this._err(err); }
     }
