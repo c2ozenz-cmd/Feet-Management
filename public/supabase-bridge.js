@@ -607,6 +607,234 @@
         this._ok({ success: true });
       } catch (err) { this._err(err); }
     }
+
+    // ── SUMMARIES / REPORTING ──
+    async getWeeklySummary(weekOffset) {
+      try {
+        weekOffset = parseInt(weekOffset) || 0;
+        const now = new Date();
+        const day = now.getDay();
+        const diff = (day === 0 ? -6 : 1 - day);
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diff + weekOffset * 7);
+        monday.setHours(0, 0, 0, 0);
+
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+
+        // Fetch repairs
+        const { data: repairs, error } = await supabase
+          .from('repairs')
+          .select('*');
+        if (error) throw error;
+
+        const mappedRepairs = (repairs || []).map(r => ({
+          repairNo: r.repair_no,
+          date: r.date,
+          plate: r.plate,
+          chassis: r.chassis,
+          mileage: r.mileage,
+          oilProgram: r.oil_program,
+          repairList: r.repair_list,
+          repairSummary: r.repair_summary,
+          status: r.status,
+          createdBy: r.created_by,
+          createdAt: r.created_at,
+          approvedBy: r.approved_by,
+          approvedAt: r.approved_at
+        }));
+
+        const openedThisWeek = mappedRepairs.filter(r => {
+          const d = new Date(r.createdAt || r.date);
+          return d >= monday && d <= sunday;
+        });
+
+        const allPending = mappedRepairs.filter(r => r.status !== 'เสร็จแล้ว');
+
+        const doneThisWeek = mappedRepairs.filter(r => {
+          if (r.status !== 'เสร็จแล้ว') return false;
+          const d = new Date(r.createdAt || r.date);
+          return d >= monday && d <= sunday;
+        });
+
+        const carryOver = mappedRepairs.filter(r => {
+          if (r.status === 'เสร็จแล้ว') return false;
+          const d = new Date(r.createdAt || r.date);
+          return d < monday;
+        });
+
+        const byStatus = {};
+        allPending.forEach(r => {
+          byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+        });
+
+        const byPlate = {};
+        openedThisWeek.forEach(r => {
+          byPlate[r.plate] = (byPlate[r.plate] || 0) + 1;
+        });
+        const topPlates = Object.entries(byPlate)
+          .map(([plate, count]) => ({ plate, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+
+        const pendingDetails = allPending
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        // Format label Helper
+        const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+        const formatLabel = (mon, sun) => {
+          return `${mon.getDate()} ${months[mon.getMonth()]} - ${sun.getDate()} ${months[sun.getMonth()]} ${sun.getFullYear() + 543}`;
+        };
+
+        this._ok({
+          success: true,
+          weekLabel: formatLabel(monday, sunday),
+          monday: monday.toISOString(),
+          sunday: sunday.toISOString(),
+          weekOffset,
+          openedCount: openedThisWeek.length,
+          doneCount: doneThisWeek.length,
+          pendingCount: allPending.length,
+          carryOverCount: carryOver.length,
+          byStatus,
+          topPlates,
+          pendingDetails
+        });
+      } catch (err) { this._err(err); }
+    }
+
+    async getExpenseSummary(filter) {
+      try {
+        // Fetch POs
+        const { data: pos, error: poErr } = await supabase
+          .from('purchase_orders')
+          .select('*');
+        if (poErr) throw poErr;
+
+        // Fetch PO items to calculate totals
+        const { data: poItems, error: itemsErr } = await supabase
+          .from('po_items')
+          .select('po_no, amount');
+        if (itemsErr) throw itemsErr;
+
+        const poTotals = {};
+        (poItems || []).forEach(item => {
+          const poNo = item.po_no;
+          const amt = parseFloat(item.amount) || 0;
+          poTotals[poNo] = (poTotals[poNo] || 0) + amt;
+        });
+
+        const from = filter?.from ? new Date(filter.from) : null;
+        const to = filter?.to ? new Date(filter.to) : null;
+        if (to) to.setHours(23, 59, 59, 999);
+
+        const mappedPOs = (pos || []).map(p => ({
+          poNo: p.po_no,
+          shopName: p.shop_name,
+          shopAddress: p.shop_address,
+          taxId: p.tax_id,
+          issueDate: p.issue_date,
+          quoteDate: p.quote_date,
+          refRepairNo: p.ref_repair_no,
+          quoteNo: p.quote_no,
+          plate: p.plate,
+          vatType: p.vat_type,
+          status: p.status,
+          createdBy: p.created_by,
+          createdAt: p.created_at,
+          approvedBy: p.approved_by,
+          approvedAt: p.approved_at
+        }));
+
+        const filteredPO = mappedPOs.filter(p => {
+          if (p.status !== 'รับของแล้ว') return false;
+          const d = new Date(p.issueDate);
+          if (from && d < from) return false;
+          if (to && d > to) return false;
+          if (filter?.plate && p.plate !== filter.plate) return false;
+          if (filter?.shopName && p.shopName !== filter.shopName) return false;
+          return true;
+        }).map(p => ({ ...p, total: poTotals[p.poNo] || 0, source: 'PO' }));
+
+        // Manual Deduct OUT-MANUAL from stock_logs
+        const { data: logs, error: logsErr } = await supabase
+          .from('stock_logs')
+          .select('*')
+          .eq('type', 'OUT-MANUAL');
+        if (logsErr) throw logsErr;
+
+        const manualRows = [];
+        (logs || []).forEach(log => {
+          const ref = log.ref || '';
+          // parse ref string "วันที่:xxx | ทะเบียน:xxx | ราคา:xxx | หมายเหตุ:xxx"
+          const getVal = key => (ref.match(new RegExp(key + ':([^|]+)')) || [])[1]?.trim() || '';
+          const dateStr = getVal('วันที่');
+          const plate = getVal('ทะเบียน');
+          const price = parseFloat(getVal('ราคา')) || 0;
+          const noteStr = getVal('หมายเหตุ');
+          const qty = parseFloat(log.qty) || 0;
+          const amount = price * qty;
+
+          if (!dateStr || !plate) return;
+
+          const d = new Date(dateStr);
+          if (from && d < from) return;
+          if (to && d > to) return;
+          if (filter?.plate && plate !== filter.plate) return;
+
+          manualRows.push({
+            poNo: 'MANUAL',
+            issueDate: dateStr,
+            plate,
+            shopName: '— ตัดโดยตรง —',
+            refRepairNo: noteStr,
+            total: amount,
+            source: 'MANUAL',
+            partName: log.part_name || '',
+            qty
+          });
+        });
+
+        const allRows = [...filteredPO, ...manualRows];
+        const grandTotal = allRows.reduce((s, r) => s + r.total, 0);
+
+        const byPlate = {};
+        allRows.forEach(r => {
+          if (!byPlate[r.plate]) byPlate[r.plate] = 0;
+          byPlate[r.plate] += r.total;
+        });
+
+        const byShop = {};
+        allRows.forEach(r => {
+          if (!byShop[r.shopName]) byShop[r.shopName] = 0;
+          byShop[r.shopName] += r.total;
+        });
+
+        const byMonth = {};
+        allRows.forEach(r => {
+          const d = new Date(r.issueDate);
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          byMonth[key] = (byMonth[key] || 0) + r.total;
+        });
+
+        this._ok({
+          success: true,
+          total: grandTotal,
+          count: allRows.length,
+          byPlate: Object.entries(byPlate)
+            .map(([plate, total]) => ({ plate, total }))
+            .sort((a, b) => b.total - a.total),
+          byShop: Object.entries(byShop)
+            .map(([shop, total]) => ({ shop, total }))
+            .sort((a, b) => b.total - a.total),
+          byMonth: Object.entries(byMonth)
+            .map(([month, total]) => ({ month, total }))
+            .sort((a, b) => a.month.localeCompare(b.month)),
+          detail: allRows.sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate))
+        });
+      } catch (err) { this._err(err); }
+    }
   }
 
   // Define global google.script.run emulation!
