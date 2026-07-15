@@ -549,18 +549,81 @@
     // ── NOTIFICATIONS ──
     async getNotifications() {
       try {
-        const { data, error } = await supabase.from('notifications').select('*').order('timestamp', { ascending: false });
-        if (error) throw error;
-        this._ok(data.map(n => ({ id: n.id, title: n.title, message: n.message, timestamp: n.timestamp, read: n.read })));
+        const [repairsRes, posRes, stockRes] = await Promise.all([
+          supabase.from('repairs').select('*'),
+          supabase.from('purchase_orders').select('*'),
+          supabase.from('stock').select('*')
+        ]);
+
+        if (repairsRes.error) throw repairsRes.error;
+        if (posRes.error) throw posRes.error;
+        if (stockRes.error) throw stockRes.error;
+
+        const repairs = repairsRes.data || [];
+        const pos = posRes.data || [];
+        const stock = stockRes.data || [];
+        const notifications = [];
+
+        // 1. PO อนุมัติแล้ว รอปริ้น (p.status === 'อนุมัติแล้ว')
+        pos.filter(p => p.status === 'อนุมัติแล้ว').forEach(p => {
+          notifications.push({
+            id: p.po_no,
+            type: 'po_approved',
+            title: 'PO อนุมัติแล้ว',
+            body: `${p.po_no} | ${p.shop_name}`,
+            action: 'po',
+            ref: p.po_no,
+            date: p.approved_at || p.issue_date
+          });
+        });
+
+        // 2. Job ซ่อมอนุมัติแล้ว (กำลังซ่อม) รอแจ้งช่าง
+        repairs.filter(r => r.status === 'กำลังซ่อม').forEach(r => {
+          notifications.push({
+            id: r.repair_no,
+            type: 'repair_approved',
+            title: 'อนุมัติซ่อมแล้ว',
+            body: `${r.repair_no} | ${r.plate}`,
+            action: 'repairs',
+            ref: r.repair_no,
+            date: r.approved_at || r.date
+          });
+        });
+
+        // 3. PO รออนุมัติ (สำหรับ admin)
+        pos.filter(p => p.status === 'รออนุมัติ').forEach(p => {
+          notifications.push({
+            id: p.po_no,
+            type: 'po_pending',
+            title: 'PO รออนุมัติ',
+            body: `${p.po_no} | ${p.shop_name}`,
+            action: 'po',
+            ref: p.po_no,
+            date: p.issue_date
+          });
+        });
+
+        // 4. Stock ใกล้หมด
+        stock.filter(s => parseFloat(s.qty) <= parseFloat(s.min_qty || 0) && parseFloat(s.min_qty) > 0)
+          .forEach(s => {
+            notifications.push({
+              id: s.id,
+              type: 'stock_low',
+              title: 'อะไหล่ใกล้หมด',
+              body: `${s.part_name} เหลือ ${s.qty} ${s.unit}`,
+              action: 'stock',
+              ref: s.id,
+              date: new Date().toISOString()
+            });
+          });
+
+        notifications.sort((a, b) => new Date(b.date) - new Date(a.date));
+        this._ok(notifications);
       } catch (err) { this._err(err); }
     }
 
     async markNotificationAsRead(id) {
-      try {
-        const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
-        if (error) throw error;
-        this._ok({ success: true });
-      } catch (err) { this._err(err); }
+      this._ok({ success: true });
     }
 
     // ── LINE LOGS ──
