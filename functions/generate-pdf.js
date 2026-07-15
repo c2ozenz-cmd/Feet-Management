@@ -3,11 +3,15 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 
 // Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+let supabase;
+function initSupabase() {
+  if (!supabase) {
+    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  }
+}
 
 exports.handler = async (event, context) => {
+  initSupabase();
   const poNo = event.queryStringParameters.poNo;
   if (!poNo) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing poNo parameter' }) };

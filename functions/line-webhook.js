@@ -2,14 +2,18 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 
 // Initialize Supabase Client
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Service Role Key is used for backend operations
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+let supabase;
+function initSupabase() {
+  if (!supabase) {
+    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  }
+}
 
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
 // Main Netlify handler
 exports.handler = async (event, context) => {
+  initSupabase();
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
