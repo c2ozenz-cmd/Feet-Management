@@ -1,0 +1,20 @@
+# Ignore everything by default
+**/*
+
+# Allow only Google Apps Script source files
+!*.gs
+!*.html
+!appsscript.json
+
+# Ignore node_modules, build files, and local settings
+node_modules/
+public/
+functions/
+build.js
+netlify.toml
+package.json
+package-lock.json
+supabase_schema.sql
+migration_helper.gs
+.gitignore
+.git/
