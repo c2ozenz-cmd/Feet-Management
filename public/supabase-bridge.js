@@ -44,7 +44,7 @@
     }
 
     // ── AUTH / LOGIN ──
-    async doLogin(username, password) {
+    async login(username, password) {
       try {
         const email = username.includes('@') ? username : `${username}@mungkung.com`;
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
