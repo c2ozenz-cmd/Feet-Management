@@ -1,31 +1,19 @@
--- SQL Schema for Fleet & Stock Management Database (Supabase PostgreSQL)
+-- SQL Schema for Fleet & Stock Management Database (Supabase PostgreSQL - Simplified Version)
 
 -- 1. EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. USERS / PROFILES (Links to auth.users in Supabase)
+-- 2. USERS / PROFILES (Independent table, direct lookup)
 CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    id TEXT PRIMARY KEY, -- e.g. U1689...
     username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL, -- Plain text password matching original Sheets
     name TEXT NOT NULL,
     status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'manager', 'user', 'mechanic')),
     line_user_id TEXT DEFAULT '',
     signature_url TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- RLS policies for profiles
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Profiles are viewable by authenticated users" 
-ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
-
-CREATE POLICY "Profiles can be updated by admin only" 
-ON public.profiles FOR UPDATE USING (
-    EXISTS (
-        SELECT 1 FROM public.profiles 
-        WHERE id = auth.uid() AND role = 'admin'
-    )
 );
 
 -- 3. BUSES
@@ -43,10 +31,6 @@ CREATE TABLE IF NOT EXISTS public.buses (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.buses ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Buses are viewable by authenticated users" ON public.buses FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Buses are editable by authenticated users" ON public.buses FOR ALL USING (auth.role() = 'authenticated');
-
 -- 4. SHOPS
 CREATE TABLE IF NOT EXISTS public.shops (
     id TEXT PRIMARY KEY DEFAULT ('SHP' || EXTRACT(EPOCH FROM NOW())::TEXT),
@@ -57,10 +41,6 @@ CREATE TABLE IF NOT EXISTS public.shops (
     note TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-ALTER TABLE public.shops ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Shops are viewable by authenticated users" ON public.shops FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Shops are editable by authenticated users" ON public.shops FOR ALL USING (auth.role() = 'authenticated');
 
 -- 5. STOCK
 CREATE TABLE IF NOT EXISTS public.stock (
@@ -74,10 +54,6 @@ CREATE TABLE IF NOT EXISTS public.stock (
     note TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-ALTER TABLE public.stock ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Stock is viewable by authenticated users" ON public.stock FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Stock is editable by authenticated users" ON public.stock FOR ALL USING (auth.role() = 'authenticated');
 
 -- 6. REPAIRS
 CREATE TABLE IF NOT EXISTS public.repairs (
@@ -96,10 +72,6 @@ CREATE TABLE IF NOT EXISTS public.repairs (
     approved_at TEXT DEFAULT ''
 );
 
-ALTER TABLE public.repairs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Repairs are viewable by authenticated users" ON public.repairs FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Repairs are editable by authenticated users" ON public.repairs FOR ALL USING (auth.role() = 'authenticated');
-
 -- 7. REPAIR PARTS
 CREATE TABLE IF NOT EXISTS public.repair_parts (
     id BIGSERIAL PRIMARY KEY,
@@ -108,10 +80,6 @@ CREATE TABLE IF NOT EXISTS public.repair_parts (
     qty NUMERIC DEFAULT 1,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-ALTER TABLE public.repair_parts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Repair parts viewable by authenticated users" ON public.repair_parts FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Repair parts editable by authenticated" ON public.repair_parts FOR ALL USING (auth.role() = 'authenticated');
 
 -- 8. PURCHASE ORDERS
 CREATE TABLE IF NOT EXISTS public.purchase_orders (
@@ -138,10 +106,6 @@ CREATE TABLE IF NOT EXISTS public.purchase_orders (
     printed_at TEXT DEFAULT ''
 );
 
-ALTER TABLE public.purchase_orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "POs are viewable by authenticated users" ON public.purchase_orders FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "POs are editable by authenticated users" ON public.purchase_orders FOR ALL USING (auth.role() = 'authenticated');
-
 -- 9. PO ITEMS
 CREATE TABLE IF NOT EXISTS public.po_items (
     id BIGSERIAL PRIMARY KEY,
@@ -156,10 +120,6 @@ CREATE TABLE IF NOT EXISTS public.po_items (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.po_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "PO items are viewable by authenticated users" ON public.po_items FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "PO items are editable by authenticated users" ON public.po_items FOR ALL USING (auth.role() = 'authenticated');
-
 -- 10. STOCK LOGS
 CREATE TABLE IF NOT EXISTS public.stock_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -170,10 +130,6 @@ CREATE TABLE IF NOT EXISTS public.stock_logs (
     ref TEXT DEFAULT '',
     log_id TEXT DEFAULT ''
 );
-
-ALTER TABLE public.stock_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Stock logs are viewable by authenticated users" ON public.stock_logs FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Stock logs can be created by authenticated users" ON public.stock_logs FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
 -- 11. OIL TEMPLATES
 CREATE TABLE IF NOT EXISTS public.oil_templates (
@@ -187,24 +143,11 @@ CREATE TABLE IF NOT EXISTS public.oil_templates (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.oil_templates ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Oil templates are viewable by authenticated users" ON public.oil_templates FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Oil templates are editable by authenticated users" ON public.oil_templates FOR ALL USING (auth.role() = 'authenticated');
-
 -- 12. SETTINGS
 CREATE TABLE IF NOT EXISTS public.settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT '',
     updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Settings viewable by authenticated users" ON public.settings FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Settings can be updated by admin only" ON public.settings FOR ALL USING (
-    EXISTS (
-        SELECT 1 FROM public.profiles 
-        WHERE id = auth.uid() AND role = 'admin'
-    )
 );
 
 -- 13. LINE LOGS
@@ -215,32 +158,7 @@ CREATE TABLE IF NOT EXISTS public.line_logs (
     detail TEXT NOT NULL
 );
 
-ALTER TABLE public.line_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Line logs are viewable by authenticated users" ON public.line_logs FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Line logs can be inserted by anyone" ON public.line_logs FOR INSERT WITH CHECK (true);
-
--- 14. TRIGGER FOR PROFILE CREATION ON USER SIGNUP
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO public.profiles (id, username, name, role, status)
-    VALUES (
-        NEW.id,
-        COALESCE(NEW.raw_user_meta_data->>'username', NEW.email),
-        COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'username', NEW.email),
-        COALESCE(NEW.raw_user_meta_data->>'role', 'user'),
-        'active'
-    );
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE OR REPLACE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- 15. SUPABASE STORAGE BUCKETS & POLICIES
--- Create buckets if they don't exist
+-- 14. SUPABASE STORAGE BUCKETS
 INSERT INTO storage.buckets (id, name, public)
 VALUES
   ('signatures', 'signatures', true),
@@ -248,22 +166,16 @@ VALUES
   ('pdf-orders', 'pdf-orders', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Public read access policies for buckets
-CREATE POLICY "Public Read Access on signatures" ON storage.objects
-  FOR SELECT USING (bucket_id = 'signatures');
-
-CREATE POLICY "Public Read Access on company-assets" ON storage.objects
-  FOR SELECT USING (bucket_id = 'company-assets');
-
-CREATE POLICY "Public Read Access on pdf-orders" ON storage.objects
-  FOR SELECT USING (bucket_id = 'pdf-orders');
-
--- Authenticated upload access policies
-CREATE POLICY "Authenticated Upload Access on signatures" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'signatures' AND auth.role() = 'authenticated');
-
-CREATE POLICY "Authenticated Upload Access on company-assets" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'company-assets' AND auth.role() = 'authenticated');
-
-CREATE POLICY "Authenticated Upload Access on pdf-orders" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'pdf-orders' AND auth.role() = 'authenticated');
+-- DISABLE ROW LEVEL SECURITY (RLS) FOR DIRECT ACCESS SIMILAR TO GOOGLE SHEETS
+ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.buses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shops DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.repairs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.repair_parts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.po_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.oil_templates DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.line_logs DISABLE ROW LEVEL SECURITY;

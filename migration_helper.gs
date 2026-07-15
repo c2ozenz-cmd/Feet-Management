@@ -23,6 +23,7 @@ function runDataMigration() {
     migrateBuses();
     migrateShops();
     migrateStock();
+    migrateProfiles();
     migrateRepairs(validPlates);
     migrateRepairParts(validRepairNos);
     migratePurchaseOrders(validRepairNos, validPlates);
@@ -301,3 +302,22 @@ function migrateOilTemplates(validPlates) {
   
   postToSupabase("oil_templates", payload);
 }
+
+function migrateProfiles() {
+  const rows = getSheetData("Users") || [];
+  if (rows.length === 0) return;
+  
+  const payload = rows.map(r => ({
+    id: String(r.id || ''),
+    username: String(r.username || '').trim(),
+    password: String(r.password || ''),
+    name: String(r.name || ''),
+    status: String(r.status || 'active'),
+    role: String(r.role || 'user'),
+    line_user_id: String(r.lineUserId || r.line_user_id || ''),
+    signature_url: String(r.signatureUrl || r.signature_url || '')
+  })).filter(r => r.id && r.username);
+  
+  postToSupabase("profiles", payload);
+}
+
