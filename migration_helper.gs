@@ -106,6 +106,47 @@ function postToSupabase(table, payload) {
   }
 }
 
+// ── FILE MIGRATION HELPERS (DRIVE TO SUPABASE STORAGE) ──
+function extractFileId(url) {
+  if (!url) return null;
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function uploadDriveFileToSupabase(fileId, bucket, destName) {
+  try {
+    const file = DriveApp.getFileById(fileId);
+    const blob = file.getBlob();
+    const bytes = blob.getBytes();
+    const mimeType = blob.getContentType();
+    
+    const uploadUrl = `${SUPABASE_URL}/storage/v1/object/${bucket}/${destName}`;
+    const options = {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": mimeType,
+        "x-upsert": "true" // Overwrite if exists
+      },
+      payload: bytes,
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(uploadUrl, options);
+    const code = response.getResponseCode();
+    if (code >= 200 && code < 300) {
+      return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${destName}`;
+    } else {
+      Logger.log(`⚠️ Warning: Failed to upload file ${fileId} to ${bucket}. Code: ${code}. Response: ${response.getContentText()}`);
+      return null;
+    }
+  } catch (e) {
+    Logger.log(`⚠️ Warning: Could not fetch file ${fileId} from Drive: ${e.message}`);
+    return null;
+  }
+}
+
 // ── TABLE MIGRATORS (INDEX-BASED COLUMN MAPPING) ──
 
 function migrateSettings() {
@@ -178,16 +219,34 @@ function migrateProfiles() {
   const rows = getSheetData("Users") || [];
   if (rows.length === 0) return;
   
-  const payload = rows.map(r => ({
-    id: String(r[0] || ''),
-    username: String(r[1] || '').trim(),
-    password: String(r[2] || ''),
-    name: String(r[3] || ''),
-    status: String(r[4] || 'active'),
-    role: String(r[5] || 'user'),
-    line_user_id: String(r[6] || ''),
-    signature_url: String(r[7] || '')
-  })).filter(r => r.id && r.username);
+  const payload = rows.map(r => {
+    const username = String(r[1] || '').trim();
+    let signatureUrl = String(r[7] || '');
+    
+    // Auto-migrate signature from Google Drive to Supabase Storage
+    if (signatureUrl.includes('drive.google.com') || signatureUrl.includes('docs.google.com')) {
+      const fileId = extractFileId(signatureUrl);
+      if (fileId) {
+        Logger.log(`Migrating signature file from Drive for user "${username}"...`);
+        const newUrl = uploadDriveFileToSupabase(fileId, "signatures", `sig-${username}.png`);
+        if (newUrl) {
+          signatureUrl = newUrl;
+          Logger.log(`✅ Signature migrated successfully: ${newUrl}`);
+        }
+      }
+    }
+    
+    return {
+      id: String(r[0] || ''),
+      username: username,
+      password: String(r[2] || ''),
+      name: String(r[3] || ''),
+      status: String(r[4] || 'active'),
+      role: String(r[5] || 'user'),
+      line_user_id: String(r[6] || ''),
+      signature_url: signatureUrl
+    };
+  }).filter(r => r.id && r.username);
   
   postToSupabase("profiles", payload);
 }
@@ -240,12 +299,41 @@ function migratePurchaseOrders(validRepairNos, validPlates) {
   if (rows.length === 0) return;
   
   const payload = rows.map(r => {
+    const poNo = String(r[0] || '').trim();
     const rawRepNo = String(r[6] || '').trim();
     const refRepairNo = validRepairNos.has(rawRepNo) ? rawRepNo : null;
     const rawPlate = String(r[8] || '').trim();
     const plate = validPlates.has(rawPlate) ? rawPlate : null;
+    
+    let pdfUrl = String(r[17] || '');
+    // Auto-migrate PDF from Google Drive to Supabase Storage
+    if (pdfUrl.includes('drive.google.com') || pdfUrl.includes('docs.google.com')) {
+      const fileId = extractFileId(pdfUrl);
+      if (fileId) {
+        Logger.log(`Migrating PDF file from Drive for PO "${poNo}"...`);
+        const newUrl = uploadDriveFileToSupabase(fileId, "pdf-orders", `po-${poNo}.pdf`);
+        if (newUrl) {
+          pdfUrl = newUrl;
+          Logger.log(`✅ PDF migrated successfully: ${newUrl}`);
+        }
+      }
+    }
+    
+    let createdBySigUrl = String(r[13] || '');
+    // Auto-migrate historical PO creator signature from Google Drive to Supabase Storage
+    if (createdBySigUrl.includes('drive.google.com') || createdBySigUrl.includes('docs.google.com')) {
+      const fileId = extractFileId(createdBySigUrl);
+      if (fileId) {
+        Logger.log(`Migrating creator signature file from Drive for PO "${poNo}"...`);
+        const newUrl = uploadDriveFileToSupabase(fileId, "signatures", `sig-po-${poNo}.png`);
+        if (newUrl) {
+          createdBySigUrl = newUrl;
+        }
+      }
+    }
+
     return {
-      po_no: String(r[0] || ''),
+      po_no: poNo,
       shop_name: String(r[1] || ''),
       shop_address: String(r[2] || ''),
       tax_id: String(r[3] || ''),
@@ -258,11 +346,11 @@ function migratePurchaseOrders(validRepairNos, validPlates) {
       status: String(r[10] || 'รออนุมัติ'),
       created_by: String(r[11] || ''),
       created_at: r[12] instanceof Date ? r[12].toISOString() : null,
-      created_by_signature_url: String(r[13] || ''),
+      created_by_signature_url: createdBySigUrl,
       approved_by: String(r[14] || ''),
       approved_at: String(r[15] || ''),
       line_sent_at: String(r[16] || ''),
-      pdf_url: String(r[17] || ''),
+      pdf_url: pdfUrl,
       grp_ref: String(r[18] || ''),
       quote_no_is_auto: r[19] === true || r[19] === 'TRUE',
       printed_at: String(r[20] || '')

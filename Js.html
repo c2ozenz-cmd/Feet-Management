@@ -3183,6 +3183,44 @@ function previewSignature() {
   }
 }
 
+async function uploadSignatureFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const username = document.getElementById('userUsername').value.trim();
+  if (!username) {
+    showToast('warning', 'กรุณากรอกชื่อผู้ใช้ (Username) ก่อนเลือกรูปภาพ เพื่อตั้งชื่อไฟล์ลายเซ็นต์');
+    input.value = '';
+    return;
+  }
+
+  showLoading('กำลังอัปโหลดรูปลายเซ็นต์...');
+  
+  try {
+    const ext = file.name.split('.').pop() || 'png';
+    const filePath = `sig-${username}-${Date.now()}.${ext}`;
+    
+    const { data, error } = await window.supabaseClient.storage
+      .from('signatures')
+      .upload(filePath, file, { cacheControl: '3600', upsert: true });
+
+    if (error) throw error;
+
+    const { data: { publicUrl } } = window.supabaseClient.storage
+      .from('signatures')
+      .getPublicUrl(filePath);
+
+    document.getElementById('userSignatureUrl').value = publicUrl;
+    previewSignature();
+    showToast('success', 'อัปโหลดรูปลายเซ็นต์เรียบร้อยแล้ว');
+  } catch (e) {
+    showToast('error', 'อัปโหลดล้มเหลว: ' + e.message);
+  } finally {
+    Swal.close();
+  }
+}
+
+
 function copyLineId() {
   const val = document.getElementById('userLineUserId').value;
   if (val) {
@@ -3248,6 +3286,9 @@ function _applyImagePreview(inputId, imgId, emptyId, url) {
 // ── parseDriveUrl: แปลง Google Drive share URL → thumbnail URL ──
 function parseDriveUrl(url) {
   if (!url) return url;
+  if (!url.includes('drive.google.com') && !url.includes('docs.google.com')) {
+    return url;
+  }
   const match = url.match(/[-\w]{25,}/);
   if (match) return 'https://drive.google.com/thumbnail?id=' + match[0] + '&sz=w400';
   return url;
