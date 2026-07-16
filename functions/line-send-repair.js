@@ -33,6 +33,15 @@ exports.handler = async (event, context) => {
     const groupId = groupSetting?.value || '';
 
     if (!LINE_CHANNEL_ACCESS_TOKEN || !groupId) {
+      await logLine('line_push_repair_config_missing', {
+        method: 'Push',
+        msgType: 'Repair',
+        recipient: groupId || 'LINE_GROUP_ID_SERVICE',
+        preview: `Repair ${repairNo}`,
+        costStatus: 'คิดเงิน',
+        code: 500,
+        success: false
+      });
       return { statusCode: 500, body: JSON.stringify({ error: 'LINE Token or Group ID Service not configured' }) };
     }
 
@@ -54,12 +63,32 @@ exports.handler = async (event, context) => {
 
     if (!lineRes.ok) {
       const lineErrText = await lineRes.text();
+      await logLine('line_push_repair_failed', {
+        method: 'Push',
+        msgType: 'Repair',
+        recipient: groupId,
+        preview: `Repair ${repair.repair_no} | ${repair.plate || ''}`,
+        costStatus: 'คิดเงิน',
+        code: lineRes.status,
+        success: false,
+        error: lineErrText
+      });
       throw new Error(`LINE API failed: ${lineRes.status} - ${lineErrText}`);
     }
 
     // 5. Update sent timestamp in settings/logs (since repairs table does not track lineSentAt directly)
     const nowStr = new Date().toISOString();
     await supabase.from('settings').upsert({ key: `linesent_repair:${repairNo}`, value: nowStr });
+    await logLine('line_push_repair_success', {
+      method: 'Push',
+      msgType: 'Repair',
+      recipient: groupId,
+      preview: `Repair ${repair.repair_no} | ${repair.plate || ''}`,
+      costStatus: 'คิดเงิน',
+      code: lineRes.status,
+      success: true,
+      sentAt: nowStr
+    });
 
     return {
       statusCode: 200,
@@ -69,9 +98,30 @@ exports.handler = async (event, context) => {
 
   } catch (err) {
     console.error('Send Repair to LINE Error:', err);
+    await logLine('line_push_repair_error', {
+      method: 'Push',
+      msgType: 'Repair',
+      recipient: 'LINE_GROUP_ID_SERVICE',
+      preview: `Repair ${repairNo}`,
+      costStatus: 'คิดเงิน',
+      code: 500,
+      success: false,
+      error: err.message
+    });
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+async function logLine(stage, detail) {
+  try {
+    await supabase.from('line_logs').insert({
+      stage,
+      detail: JSON.stringify(detail)
+    });
+  } catch (err) {
+    console.error('LINE log insert failed:', err);
+  }
+}
 
 function buildRepairFlexMessage(repair) {
   const statusColor = {

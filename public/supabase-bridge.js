@@ -14,6 +14,18 @@
   const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
   window.supabaseClient = supabase; // Export globally
 
+  function formatDateTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value || '');
+    return date.toLocaleString('th-TH', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
   // Bridge class for the frontend command API.
   class ScriptRunBridge {
     constructor() {
@@ -1068,7 +1080,29 @@
       try {
         const { data, error } = await supabase.from('line_logs').select('*').order('timestamp', { ascending: false }).limit(200);
         if (error) throw error;
-        this._ok(data.map(l => ({ timestamp: l.timestamp, stage: l.stage, detail: l.detail })));
+        const mapped = (data || []).map(l => {
+          let detail = {};
+          try {
+            detail = typeof l.detail === 'string' ? JSON.parse(l.detail) : (l.detail || {});
+          } catch (parseErr) {
+            detail = { preview: l.detail || '' };
+          }
+          const stage = String(l.stage || '');
+          const isPush = String(detail.method || stage).toLowerCase().includes('push');
+          const success = detail.success !== false && !stage.includes('failed') && !stage.includes('error') && !stage.includes('denied') && !stage.includes('invalid');
+          return {
+            timestamp: l.timestamp ? formatDateTime(l.timestamp) : '',
+            stage,
+            detail: l.detail,
+            method: detail.method || (isPush ? 'Push' : 'Reply'),
+            msgType: detail.msgType || detail.type || (stage.includes('po') ? 'PO' : (stage.includes('repair') ? 'Repair' : 'LINE')),
+            recipient: detail.recipient || detail.groupId || detail.lineUserId || '-',
+            preview: detail.preview || detail.id || detail.data || stage,
+            costStatus: detail.costStatus || (isPush ? 'คิดเงิน' : 'ฟรี'),
+            code: detail.code || (success ? 200 : 500)
+          };
+        });
+        this._ok(mapped);
       } catch (err) { this._err(err); }
     }
 

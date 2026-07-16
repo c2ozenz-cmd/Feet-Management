@@ -35,6 +35,15 @@ exports.handler = async (event, context) => {
     const groupId = groupSetting?.value || '';
 
     if (!LINE_CHANNEL_ACCESS_TOKEN || !groupId) {
+      await logLine('line_push_po_config_missing', {
+        method: 'Push',
+        msgType: 'PO',
+        recipient: groupId || 'LINE_GROUP_ID_PO',
+        preview: `PO ${poNo}`,
+        costStatus: 'คิดเงิน',
+        code: 500,
+        success: false
+      });
       return { statusCode: 500, body: JSON.stringify({ error: 'LINE Token or Group ID PO not configured' }) };
     }
 
@@ -56,12 +65,32 @@ exports.handler = async (event, context) => {
 
     if (!lineRes.ok) {
       const lineErrText = await lineRes.text();
+      await logLine('line_push_po_failed', {
+        method: 'Push',
+        msgType: 'PO',
+        recipient: groupId,
+        preview: `PO ${po.po_no} | ${po.shop_name || ''}`,
+        costStatus: 'คิดเงิน',
+        code: lineRes.status,
+        success: false,
+        error: lineErrText
+      });
       throw new Error(`LINE API failed: ${lineRes.status} - ${lineErrText}`);
     }
 
     // 5. Update sent timestamp in DB
     const nowStr = new Date().toISOString();
     await supabase.from('purchase_orders').update({ line_sent_at: nowStr }).eq('po_no', poNo);
+    await logLine('line_push_po_success', {
+      method: 'Push',
+      msgType: 'PO',
+      recipient: groupId,
+      preview: `PO ${po.po_no} | ${po.shop_name || ''}`,
+      costStatus: 'คิดเงิน',
+      code: lineRes.status,
+      success: true,
+      sentAt: nowStr
+    });
 
     return {
       statusCode: 200,
@@ -71,9 +100,30 @@ exports.handler = async (event, context) => {
 
   } catch (err) {
     console.error('Send PO to LINE Error:', err);
+    await logLine('line_push_po_error', {
+      method: 'Push',
+      msgType: 'PO',
+      recipient: 'LINE_GROUP_ID_PO',
+      preview: `PO ${poNo}`,
+      costStatus: 'คิดเงิน',
+      code: 500,
+      success: false,
+      error: err.message
+    });
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+async function logLine(stage, detail) {
+  try {
+    await supabase.from('line_logs').insert({
+      stage,
+      detail: JSON.stringify(detail)
+    });
+  } catch (err) {
+    console.error('LINE log insert failed:', err);
+  }
+}
 
 function buildPOFlexMessage(po, items) {
   return {
