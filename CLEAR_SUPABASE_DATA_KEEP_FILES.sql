@@ -1,6 +1,6 @@
 -- Clear duplicated migrated data from Supabase while keeping uploaded files.
 --
--- Use this in Supabase SQL Editor before running migration_helper.gs again.
+-- Use this in Supabase SQL Editor before importing data again.
 --
 -- This script DOES NOT touch:
 -- - storage.buckets

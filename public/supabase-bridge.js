@@ -1,5 +1,5 @@
-// Supabase Compatibility Bridge for Google Apps Script (google.script.run)
-// This file maps legacy google.script.run calls directly to Supabase client queries.
+// Supabase compatibility layer for the frontend command API.
+// This maps existing UI calls to Supabase and Netlify Functions.
 
 (function() {
   // Read config from meta tags or environment (Netlify injects these into window)
@@ -14,7 +14,7 @@
   const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
   window.supabaseClient = supabase; // Export globally
 
-  // Bridge class to mimic google.script.run structure
+  // Bridge class for the frontend command API.
   class ScriptRunBridge {
     constructor() {
       this.successCallback = null;

@@ -349,7 +349,7 @@ function parseQueryString(queryString) {
   return params;
 }
 
-// Flex Message Builders (translated from LINE API formats in Line.gs)
+// Flex Message Builders
 function buildPOFlexMessage(po, items) {
   return {
     type: 'flex',
