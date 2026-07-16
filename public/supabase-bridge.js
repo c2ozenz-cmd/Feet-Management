@@ -43,37 +43,210 @@
       else if (window.showToast) window.showToast('error', error.message || String(error));
     }
 
+    _makeId(prefix) {
+      return `${prefix}${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    }
+
+    async _generatePartCodeValue() {
+      const prefix = 'P';
+      const { data, error } = await supabase
+        .from('stock')
+        .select('part_code')
+        .like('part_code', `${prefix}%`)
+        .order('part_code', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      const latest = (data || []).find(r => /^P\d+$/.test(String(r.part_code || '')));
+      const next = latest ? (parseInt(String(latest.part_code).slice(1), 10) || 0) + 1 : 1;
+      return `${prefix}${String(next).padStart(4, '0')}`;
+    }
+
+    async _logStockTransaction(type, partName, qty, ref, logId) {
+      const { error } = await supabase.from('stock_logs').insert({
+        type,
+        part_name: partName,
+        qty: parseFloat(qty) || 0,
+        ref: ref || '',
+        log_id: logId || this._makeId('LOG')
+      });
+      if (error) throw error;
+    }
+
+    async _addStockFromPO(poNo) {
+      const { data: items, error: itemsErr } = await supabase
+        .from('po_items')
+        .select('*')
+        .eq('po_no', poNo);
+      if (itemsErr) throw itemsErr;
+
+      for (const item of (items || [])) {
+        const partName = item.part_name;
+        const qty = parseFloat(item.qty) || 0;
+        if (!partName || qty <= 0) continue;
+
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('part_name', partName)
+          .limit(1);
+        if (stockErr) throw stockErr;
+
+        const existing = (stockRows || [])[0];
+        if (existing) {
+          const { error } = await supabase
+            .from('stock')
+            .update({ qty: (parseFloat(existing.qty) || 0) + qty })
+            .eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          const partCode = await this._generatePartCodeValue();
+          const { error } = await supabase.from('stock').insert({
+            id: this._makeId('STK'),
+            part_code: partCode,
+            part_name: partName,
+            unit: item.unit || 'ชิ้น',
+            qty,
+            min_qty: 0,
+            location: '',
+            note: `นำเข้าจาก PO: ${poNo}`
+          });
+          if (error) throw error;
+        }
+
+        await this._logStockTransaction('IN', partName, qty, `PO: ${poNo}`);
+      }
+    }
+
+    async _syncPOPartsToRepair(poNo) {
+      const { data: po, error: poErr } = await supabase
+        .from('purchase_orders')
+        .select('ref_repair_no')
+        .eq('po_no', poNo)
+        .single();
+      if (poErr) throw poErr;
+      const repairNo = po?.ref_repair_no;
+      if (!repairNo) return;
+
+      const { data: items, error: itemsErr } = await supabase
+        .from('po_items')
+        .select('*')
+        .eq('po_no', poNo);
+      if (itemsErr) throw itemsErr;
+
+      for (const item of (items || [])) {
+        const partName = item.part_name;
+        if (!partName) continue;
+        const { data: existing, error: existingErr } = await supabase
+          .from('repair_parts')
+          .select('*')
+          .eq('repair_no', repairNo)
+          .eq('part_name', partName)
+          .maybeSingle();
+        if (existingErr) throw existingErr;
+
+        const qty = parseFloat(item.qty) || 0;
+        if (existing) {
+          const { error } = await supabase
+            .from('repair_parts')
+            .update({ qty: (parseFloat(existing.qty) || 0) + qty })
+            .eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('repair_parts').insert({
+            repair_no: repairNo,
+            part_name: partName,
+            qty
+          });
+          if (error) throw error;
+        }
+      }
+    }
+
+    async _deductStockForRepair(repairNo) {
+      const { data: priorLogs, error: priorErr } = await supabase
+        .from('stock_logs')
+        .select('id')
+        .eq('type', 'OUT')
+        .eq('ref', `Repair: ${repairNo}`)
+        .limit(1);
+      if (priorErr) throw priorErr;
+      if ((priorLogs || []).length) return;
+
+      const { data: parts, error: partsErr } = await supabase
+        .from('repair_parts')
+        .select('*')
+        .eq('repair_no', repairNo);
+      if (partsErr) throw partsErr;
+
+      for (const part of (parts || [])) {
+        const partName = part.part_name;
+        const deductQty = parseFloat(part.qty) || 0;
+        if (!partName || deductQty <= 0) continue;
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('part_name', partName)
+          .limit(1);
+        if (stockErr) throw stockErr;
+        const stock = (stockRows || [])[0];
+        if (!stock) continue;
+        const currentQty = parseFloat(stock.qty) || 0;
+        const { error: updateErr } = await supabase
+          .from('stock')
+          .update({ qty: Math.max(0, currentQty - deductQty) })
+          .eq('id', stock.id);
+        if (updateErr) throw updateErr;
+        await this._logStockTransaction('OUT', partName, deductQty, `Repair: ${repairNo}`);
+      }
+    }
+
+    async _restoreStockForRepair(repairNo) {
+      const { data: logs, error: logsErr } = await supabase
+        .from('stock_logs')
+        .select('*')
+        .eq('type', 'OUT')
+        .eq('ref', `Repair: ${repairNo}`);
+      if (logsErr) throw logsErr;
+
+      let restoredCount = 0;
+      for (const log of (logs || [])) {
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('part_name', log.part_name)
+          .limit(1);
+        if (stockErr) throw stockErr;
+        const stock = (stockRows || [])[0];
+        if (stock) {
+          const { error: updateErr } = await supabase
+            .from('stock')
+            .update({ qty: (parseFloat(stock.qty) || 0) + (parseFloat(log.qty) || 0) })
+            .eq('id', stock.id);
+          if (updateErr) throw updateErr;
+          restoredCount++;
+        }
+        await supabase.from('stock_logs').delete().eq('id', log.id);
+      }
+      return restoredCount;
+    }
+
     // ── AUTH / LOGIN ──
     async login(username, password) {
       try {
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('username', username)
-          .eq('password', password)
-          .single();
-        
-        if (error || !profile) {
-          throw new Error('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+        const res = await fetch('/.netlify/functions/auth-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) {
+          throw new Error(json.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
         }
 
-        if (profile.status !== 'active') {
-          throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
-        }
+        window.currentUser = json.user;
+        window.appSessionToken = json.token || '';
 
-        const user = {
-          id: profile.id,
-          username: profile.username,
-          name: profile.name,
-          status: profile.status,
-          role: profile.role,
-          lineUserId: profile.line_user_id,
-          signatureUrl: profile.signature_url
-        };
-
-        window.currentUser = user; // Store globally for other operations
-
-        this._ok({ success: true, user });
+        this._ok({ success: true, user: json.user, token: json.token || '' });
       } catch (err) {
         this._ok({ success: false, message: err.message });
       }
@@ -92,12 +265,38 @@
 
     async saveSettings(settingsObj) {
       try {
-        const upserts = Object.keys(settingsObj).map(key => ({
-          key: key,
-          value: String(settingsObj[key])
-        }));
-        const { error } = await supabase.from('settings').upsert(upserts);
-        if (error) throw error;
+        const normalized = Array.isArray(settingsObj)
+          ? settingsObj
+              .filter(item => item && item.key)
+              .map(item => ({ key: String(item.key).trim(), value: String(item.value ?? '') }))
+          : Object.keys(settingsObj || {}).map(key => ({
+              key: String(key).trim(),
+              value: String(settingsObj[key] ?? '')
+            }));
+
+        const settingsMap = new Map();
+        normalized.forEach(item => {
+          if (item.key) settingsMap.set(item.key, item.value);
+        });
+        const upserts = Array.from(settingsMap, ([key, value]) => ({ key, value }));
+
+        const { data: existingRows, error: fetchError } = await supabase.from('settings').select('key');
+        if (fetchError) throw fetchError;
+
+        const nextKeys = new Set(upserts.map(item => item.key));
+        const keysToDelete = (existingRows || [])
+          .map(row => row.key)
+          .filter(key => key && !nextKeys.has(key));
+
+        if (keysToDelete.length) {
+          const { error: deleteError } = await supabase.from('settings').delete().in('key', keysToDelete);
+          if (deleteError) throw deleteError;
+        }
+
+        if (upserts.length) {
+          const { error } = await supabase.from('settings').upsert(upserts, { onConflict: 'key' });
+          if (error) throw error;
+        }
         this._ok({ success: true });
       } catch (err) { this._err(err); }
     }
@@ -199,9 +398,12 @@
     // ── BUSES ──
     async getBusPlates() {
       try {
-        const { data, error } = await supabase.from('buses').select('plate').order('plate');
+        const { data, error } = await supabase.from('buses').select('plate, chassis').order('plate');
         if (error) throw error;
-        this._ok((data || []).map(b => b.plate));
+        this._ok((data || []).map(b => ({
+          plate: b.plate,
+          chassis: b.chassis || ''
+        })));
       } catch (err) { this._err(err); }
     }
 
@@ -345,6 +547,30 @@
       } catch (err) { this._err(err); }
     }
 
+    async updateRepairStatus(repairNo, status) {
+      try {
+        const payload = { status };
+        if (status === 'กำลังซ่อม') {
+          payload.approved_by = window.currentUser?.name || '';
+          payload.approved_at = new Date().toISOString();
+        }
+        const { error } = await supabase.from('repairs').update(payload).eq('repair_no', repairNo);
+        if (error) throw error;
+        if (status === 'เสร็จแล้ว') {
+          await this._deductStockForRepair(repairNo);
+        }
+        this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async deleteRepair(repairNo) {
+      try {
+        const { error } = await supabase.from('repairs').delete().eq('repair_no', repairNo);
+        if (error) throw error;
+        this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
     // ── PURCHASE ORDERS ──
     async getPOs() {
       try {
@@ -370,6 +596,67 @@
           poNo: i.po_no, partName: i.part_name, qty: i.qty, unit: i.unit,
           pricePerUnit: i.price_per_unit, discount: i.discount, amount: i.amount, note: i.note
         })));
+      } catch (err) { this._err(err); }
+    }
+
+    async getPOForPrint(poNo) {
+      try {
+        const [poRes, itemsRes, settingsRes] = await Promise.all([
+          supabase.from('purchase_orders').select('*').eq('po_no', poNo).single(),
+          supabase.from('po_items').select('*').eq('po_no', poNo),
+          supabase.from('settings').select('*')
+        ]);
+
+        if (poRes.error || !poRes.data) throw new Error('PO not found: ' + (poRes.error?.message || poNo));
+        if (itemsRes.error) throw itemsRes.error;
+        if (settingsRes.error) throw settingsRes.error;
+
+        const poRow = poRes.data;
+        const po = {
+          poNo: poRow.po_no,
+          shopName: poRow.shop_name,
+          shopAddress: poRow.shop_address,
+          taxId: poRow.tax_id,
+          issueDate: poRow.issue_date,
+          quoteDate: poRow.quote_date,
+          refRepairNo: poRow.ref_repair_no,
+          quoteNo: poRow.quote_no,
+          plate: poRow.plate,
+          vatType: poRow.vat_type,
+          status: poRow.status,
+          createdBy: poRow.created_by,
+          createdAt: poRow.created_at,
+          createdBySignatureUrl: poRow.created_by_signature_url,
+          approvedBy: poRow.approved_by,
+          approvedAt: poRow.approved_at,
+          lineSentAt: poRow.line_sent_at,
+          pdfUrl: poRow.pdf_url,
+          printedAt: poRow.printed_at
+        };
+
+        const items = (itemsRes.data || []).map(i => ({
+          poNo: i.po_no,
+          partName: i.part_name,
+          qty: i.qty,
+          unit: i.unit,
+          pricePerUnit: i.price_per_unit,
+          discount: i.discount,
+          amount: i.amount,
+          note: i.note
+        }));
+
+        const settings = (settingsRes.data || []).map(s => ({ key: s.key, value: s.value }));
+        let sigUrl = '';
+        if (poRow.approved_by) {
+          const { data: approver } = await supabase
+            .from('profiles')
+            .select('signature_url')
+            .eq('name', poRow.approved_by)
+            .maybeSingle();
+          sigUrl = approver?.signature_url || '';
+        }
+
+        this._ok({ po, items, settings, sigUrl });
       } catch (err) { this._err(err); }
     }
 
@@ -412,6 +699,7 @@
         };
 
         if (po.poNo) {
+          if (po.status) payload.status = po.status;
           const { error } = await supabase.from('purchase_orders').update(payload).eq('po_no', poNo);
           if (error) throw error;
         } else {
@@ -459,16 +747,49 @@
       } catch (err) { this._err(err); }
     }
 
+    async updatePOStatus(poNo, status, approvedBy, syncStock) {
+      try {
+        const payload = { status };
+        if (status === 'อนุมัติแล้ว') {
+          payload.approved_by = approvedBy || window.currentUser?.name || '';
+          payload.approved_at = new Date().toISOString();
+        }
+        const { error } = await supabase.from('purchase_orders').update(payload).eq('po_no', poNo);
+        if (error) throw error;
+
+        if (status === 'รับของแล้ว' && syncStock !== false) {
+          await this._addStockFromPO(poNo);
+          await this._syncPOPartsToRepair(poNo);
+        }
+        this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
     // ── STOCK ──
     async getStock() {
       try {
-        const { data, error } = await supabase.from('stock').select('*').order('part_name');
+        const [{ data, error }, { data: poItems, error: itemsErr }] = await Promise.all([
+          supabase.from('stock').select('*').order('part_name'),
+          supabase.from('po_items').select('part_name, price_per_unit, created_at').order('created_at', { ascending: true })
+        ]);
         if (error) throw error;
+        if (itemsErr) throw itemsErr;
+        const lastPrices = {};
+        (poItems || []).forEach(item => {
+          if (item.part_name) lastPrices[String(item.part_name).toLowerCase()] = parseFloat(item.price_per_unit) || 0;
+        });
         const mapped = data.map(s => ({
           id: s.id, partCode: s.part_code, partName: s.part_name, unit: s.unit,
-          qty: s.qty, minQty: s.min_qty, location: s.location, note: s.note
+          qty: s.qty, minQty: s.min_qty, location: s.location, note: s.note,
+          lastPrice: lastPrices[String(s.part_name || '').toLowerCase()] || 0
         }));
         this._ok(mapped);
+      } catch (err) { this._err(err); }
+    }
+
+    async generatePartCode() {
+      try {
+        this._ok(await this._generatePartCodeValue());
       } catch (err) { this._err(err); }
     }
 
@@ -484,9 +805,11 @@
           if (error) throw error;
           this._ok({ success: true });
         } else {
+          payload.id = this._makeId('STK');
+          if (!payload.part_code) payload.part_code = await this._generatePartCodeValue();
           const { data, error } = await supabase.from('stock').insert(payload).select().single();
           if (error) throw error;
-          this._ok({ success: true, id: data.id });
+          this._ok({ success: true, id: data.id, partCode: data.part_code });
         }
       } catch (err) { this._err(err); }
     }
@@ -511,6 +834,85 @@
         }));
         this._ok(mapped);
       } catch (err) { this._err(err); }
+    }
+
+    async manualDeductStock(items, date, plate, note) {
+      try {
+        const results = [];
+        for (const item of (items || [])) {
+          const { data: stock, error: stockErr } = await supabase
+            .from('stock')
+            .select('*')
+            .eq('id', item.stockId)
+            .single();
+          if (stockErr || !stock) {
+            results.push({ partName: item.partName, stockId: item.stockId, error: 'ไม่พบอะไหล่' });
+            continue;
+          }
+
+          const currentQty = parseFloat(stock.qty) || 0;
+          const deductQty = parseFloat(item.qty) || 0;
+          const newQty = Math.max(0, currentQty - deductQty);
+          const price = parseFloat(item.pricePerUnit) || 0;
+          const logId = this._makeId('LOG');
+          const ref = `วันที่:${date} | ทะเบียน:${plate} | ราคา:${price} | หมายเหตุ:${note || '-'}`;
+
+          const { error: updateErr } = await supabase
+            .from('stock')
+            .update({ qty: newQty })
+            .eq('id', stock.id);
+          if (updateErr) throw updateErr;
+          await this._logStockTransaction('OUT-MANUAL', stock.part_name, deductQty, ref, logId);
+
+          results.push({
+            partName: stock.part_name,
+            stockId: stock.id,
+            before: currentQty,
+            after: newQty,
+            logId
+          });
+        }
+        this._ok({ success: true, results });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async cancelDeductStock(logId) {
+      try {
+        if (!logId) throw new Error('logId ไม่ถูกต้อง');
+        const { data: log, error: logErr } = await supabase
+          .from('stock_logs')
+          .select('*')
+          .eq('log_id', logId)
+          .single();
+        if (logErr || !log) throw new Error('ไม่พบ logId: ' + logId);
+        if (log.type === 'CANCEL') throw new Error('รายการนี้ถูกยกเลิกไปแล้ว');
+        if (log.type !== 'OUT-MANUAL') throw new Error('ยกเลิกได้เฉพาะรายการตัดออก manual');
+
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('part_name', log.part_name)
+          .limit(1);
+        if (stockErr) throw stockErr;
+        const stock = (stockRows || [])[0];
+        if (!stock) throw new Error(`ไม่พบอะไหล่ "${log.part_name}" ใน Stock`);
+
+        const qty = parseFloat(log.qty) || 0;
+        const { error: updateErr } = await supabase
+          .from('stock')
+          .update({ qty: (parseFloat(stock.qty) || 0) + qty })
+          .eq('id', stock.id);
+        if (updateErr) throw updateErr;
+
+        const cancelRef = `${log.ref || ''} (ยกเลิกเมื่อ ${new Date().toISOString().slice(0, 16).replace('T', ' ')})`;
+        const { error: logUpdateErr } = await supabase
+          .from('stock_logs')
+          .update({ type: 'CANCEL', ref: cancelRef })
+          .eq('log_id', logId);
+        if (logUpdateErr) throw logUpdateErr;
+
+        this._ok({ success: true, partName: log.part_name, qty });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
     }
 
     // ── OIL TEMPLATES ──
@@ -543,6 +945,41 @@
           if (error) throw error;
         }
         this._ok({ success: true });
+      } catch (err) { this._err(err); }
+    }
+
+    async getOilTemplateByPlateProgram(plate, program) {
+      try {
+        const { data, error } = await supabase
+          .from('oil_templates')
+          .select('*')
+          .eq('plate', plate)
+          .eq('program', program)
+          .order('id');
+        if (error) throw error;
+        this._ok((data || []).map(t => ({
+          plate: t.plate,
+          program: t.program,
+          partName: t.part_name,
+          qty: t.qty,
+          unit: t.unit,
+          pricePerUnit: t.price_per_unit
+        })));
+      } catch (err) { this._err(err); }
+    }
+
+    async getOilTemplateItems(program, plate) {
+      return this.getOilTemplateByPlateProgram(plate, program);
+    }
+
+    async getOilProgramsByPlate(plate) {
+      try {
+        const { data, error } = await supabase
+          .from('oil_templates')
+          .select('program')
+          .eq('plate', plate);
+        if (error) throw error;
+        this._ok([...new Set((data || []).map(r => r.program).filter(Boolean))]);
       } catch (err) { this._err(err); }
     }
 
@@ -635,6 +1072,17 @@
       } catch (err) { this._err(err); }
     }
 
+    async clearLineLogs() {
+      try {
+        const { error } = await supabase
+          .from('line_logs')
+          .delete()
+          .neq('id', -1);
+        if (error) throw error;
+        this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
     // ── INTEGRATIONS: LINE SENDS AND PDF TRIGGER ──
     async sendPOToLineDirect(poNo) {
       try {
@@ -645,6 +1093,14 @@
       } catch (err) { this._err(err); }
     }
 
+    async sendPOToLine(poNo) {
+      return this.sendPOToLineDirect(poNo);
+    }
+
+    async forceSendPOToLine(poNo) {
+      return this.sendPOToLineDirect(poNo);
+    }
+
     async sendRepairToLineDirect(repairNo) {
       try {
         const res = await fetch(`/.netlify/functions/line-send-repair?repairNo=${repairNo}`, { method: 'POST' });
@@ -652,6 +1108,34 @@
         if (!res.ok) throw new Error(json.error || 'Failed to send Repair request to LINE');
         this._ok(json);
       } catch (err) { this._err(err); }
+    }
+
+    async sendRepairToLine(repairNo) {
+      return this.sendRepairToLineDirect(repairNo);
+    }
+
+    async forceSendRepairToLine(repairNo) {
+      return this.sendRepairToLineDirect(repairNo);
+    }
+
+    async sendPOsToLineQueue(poNos) {
+      try {
+        const results = [];
+        for (const poNo of (poNos || [])) {
+          try {
+            const res = await fetch(`/.netlify/functions/line-send-po?poNo=${encodeURIComponent(poNo)}`, { method: 'POST' });
+            const json = await res.json().catch(() => ({}));
+            results.push({ poNo, success: res.ok && json.success !== false, ...json });
+          } catch (err) {
+            results.push({ poNo, success: false, message: err.message });
+          }
+        }
+        this._ok({ success: results.every(r => r.success), results });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async getLineQuotaStatus() {
+      this._ok({ success: true, remaining: null, limit: null, message: 'ไม่สามารถตรวจ quota จาก LINE API ฝั่ง client ได้' });
     }
 
     async generateAndSavePOPdf(poNo) {
@@ -791,6 +1275,12 @@
         const from = filter?.from ? new Date(filter.from) : null;
         const to = filter?.to ? new Date(filter.to) : null;
         if (to) to.setHours(23, 59, 59, 999);
+        const plates = Array.isArray(filter?.plates)
+          ? filter.plates.filter(Boolean)
+          : (filter?.plate ? [filter.plate] : []);
+        const shopNames = Array.isArray(filter?.shopNames)
+          ? filter.shopNames.filter(Boolean)
+          : (filter?.shopName ? [filter.shopName] : []);
 
         const mappedPOs = (pos || []).map(p => ({
           poNo: p.po_no,
@@ -815,8 +1305,8 @@
           const d = new Date(p.issueDate);
           if (from && d < from) return false;
           if (to && d > to) return false;
-          if (filter?.plate && p.plate !== filter.plate) return false;
-          if (filter?.shopName && p.shopName !== filter.shopName) return false;
+          if (plates.length && !plates.includes(p.plate)) return false;
+          if (shopNames.length && !shopNames.includes(p.shopName)) return false;
           return true;
         }).map(p => ({ ...p, total: poTotals[p.poNo] || 0, source: 'PO' }));
 
@@ -844,7 +1334,7 @@
           const d = new Date(dateStr);
           if (from && d < from) return;
           if (to && d > to) return;
-          if (filter?.plate && plate !== filter.plate) return;
+          if (plates.length && !plates.includes(plate)) return;
 
           manualRows.push({
             poNo: 'MANUAL',

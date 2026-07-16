@@ -104,6 +104,7 @@
   <input type="hidden" id="editPONo">
   <input type="hidden" id="poGrpRef">
   <input type="hidden" id="poQuoteNoIsAuto" value="false">
+  <input type="hidden" id="poCurrentStatus" value="รออนุมัติ">
 
   <!-- Card 1: ข้อมูลร้านค้า -->
 <div class="card">
@@ -133,6 +134,7 @@
           <input type="text" id="poPlate" class="form-control"
             placeholder="พิมพ์หรือเลือกทะเบียน..."
             oninput="showComboList('poPlate','poPlateComboList', allBuses, 'plate')"
+            onkeydown="handleComboKey(event,'poPlate','poPlateComboList')"
             autocomplete="off"
             required>
           <ul id="poPlateComboList" class="combo-list"></ul>
@@ -148,7 +150,8 @@
         <div class="combo-wrapper">
           <input type="text" id="poShopName" class="form-control"
             placeholder="พิมพ์ชื่อร้านค้า..."
-            oninput="showComboList('poShopName','shopComboList', allShops, 'name')"
+            oninput="showComboList('poShopName','shopComboList', allShops, 'name'); onShopNameChange()"
+            onkeydown="handleComboKey(event,'poShopName','shopComboList')"
             onchange="onShopNameChange()"
             autocomplete="off"
             required>

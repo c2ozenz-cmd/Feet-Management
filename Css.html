@@ -395,6 +395,20 @@ body {
 .status-inprogress { background: rgba(217,119,87,0.15); color: var(--claude-primary-dark); }
 .status-waiting-parts { background: rgba(90,90,90,0.12); color: #555; }
 .status-done { background: rgba(90,138,106,0.15); color: var(--claude-success); }
+.po-status-cell {
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  overflow: visible;
+}
+.po-status-select {
+  width: 132px;
+  max-width: 132px;
+  min-height: 28px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 /* ── STEPPER ── */
 .repair-stepper {
@@ -590,39 +604,48 @@ body {
 }
 .combo-list {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 6px);
   left: 0; right: 0;
-  z-index: 9999;
-  background: var(--claude-card, #ffffff);
+  z-index: 2050;
+  background: #fff;
   border: 1px solid var(--claude-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 30px rgba(44,44,44,0.14);
   max-height: 220px;
   overflow-y: auto;
   list-style: none;
-  padding: 4px 0;
-  margin: 4px 0 0;
+  padding: 6px;
+  margin: 0;
   display: none;
 }
 .combo-list.show {
   display: block;
 }
 .combo-list li {
-  padding: 8px 14px;
+  min-height: 34px;
+  padding: 8px 10px;
   cursor: pointer;
-  font-size: 13px;
-  transition: background 0.15s;
-  background: var(--claude-card, #ffffff);  /* ← เพิ่มตรงนี้ */
-  color: var(--claude-text, #212529); 
+  font-size: 14px;
+  line-height: 1.3;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+  background: #fff;
+  color: var(--claude-text, #212529);
 }
-.combo-list li:hover {
-  background: rgba(61,90,254,0.08);
+.combo-list li:hover,
+.combo-list li.active {
+  background: rgba(217,119,87,0.12);
+  color: var(--claude-primary-dark);
 }
 .combo-list li mark {
-  background: rgba(61,90,254,0.18);
+  background: rgba(217,119,87,0.2);
   color: inherit;
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 700;
+}
+.summary-combo .form-control {
+  background: var(--claude-bg);
 }
 
 
@@ -1103,5 +1126,190 @@ body {
   .scrollable-table-container {
     max-height: 350px;
   }
+}
+
+.users-table {
+  table-layout: fixed;
+}
+.users-table th,
+.users-table td {
+  height: 56px;
+  vertical-align: middle;
+}
+.users-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.users-table th:last-child,
+.users-table td:last-child {
+  overflow: visible;
+  text-align: center;
+}
+.user-actions {
+  min-width: 72px;
+  height: 32px;
+}
+
+.ts-wrapper.form-control,
+.ts-wrapper.form-select {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  min-height: auto;
+}
+.ts-wrapper .ts-control,
+.ts-wrapper.form-control .ts-control,
+.ts-wrapper.form-select .ts-control {
+  min-height: 37px;
+  padding: 6px 36px 6px 12px;
+  border: 1px solid var(--claude-border);
+  border-radius: var(--radius-sm);
+  background: var(--claude-bg);
+  color: var(--claude-text);
+  box-shadow: none;
+  font-family: 'Sarabun', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.ts-wrapper.focus .ts-control,
+.ts-wrapper.form-control.focus .ts-control,
+.ts-wrapper.form-select.focus .ts-control {
+  border-color: var(--claude-primary);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(217,119,87,0.15);
+}
+.ts-wrapper .ts-control input {
+  font-family: 'Sarabun', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.ts-wrapper .ts-control input::placeholder {
+  color: var(--claude-text-muted);
+  opacity: 1;
+}
+.ts-wrapper.disabled .ts-control,
+.ts-wrapper.form-control.disabled .ts-control,
+.ts-wrapper.form-select.disabled .ts-control {
+  background: var(--claude-bg);
+  color: var(--claude-text-muted);
+  opacity: 1;
+}
+.combo-wrapper .ts-input-control {
+  display: block !important;
+  width: 100% !important;
+}
+.combo-wrapper .ts-input-control .ts-control,
+.combo-wrapper .ts-input-control.input-active .ts-control,
+.combo-wrapper .ts-input-control.dropdown-active .ts-control,
+.combo-wrapper .ts-input-control.has-items .ts-control,
+.ts-wrapper.ts-input-control:not(.ts-badge-status) .ts-control,
+.ts-wrapper.ts-input-control:not(.ts-badge-status).input-active .ts-control {
+  width: 100% !important;
+  min-height: 38px !important;
+  padding: 0.375rem 2.25rem 0.375rem 0.75rem !important;
+  border: 1px solid var(--claude-border) !important;
+  border-radius: var(--radius-sm) !important;
+  background: var(--claude-bg) !important;
+  background-color: var(--claude-bg) !important;
+  background-image: none !important;
+  color: var(--claude-text) !important;
+  box-shadow: none !important;
+  font-family: 'Sarabun', sans-serif !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+  align-items: center !important;
+}
+.combo-wrapper .ts-input-control.focus .ts-control {
+  border-color: var(--claude-primary) !important;
+  background: white !important;
+  background-color: white !important;
+  box-shadow: 0 0 0 3px rgba(217,119,87,0.15) !important;
+}
+.combo-wrapper .ts-input-control .ts-control > input,
+.ts-wrapper.ts-input-control .ts-control > input {
+  padding: 0 !important;
+  margin: 0 !important;
+  min-width: 1px !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  font-family: 'Sarabun', sans-serif !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+  color: var(--claude-text) !important;
+}
+.combo-wrapper .ts-input-control .ts-control > input::placeholder,
+.ts-wrapper.ts-input-control .ts-control > input::placeholder {
+  color: var(--claude-text-muted) !important;
+  opacity: 1 !important;
+}
+.ts-wrapper.ts-input-control.has-items .ts-control > input {
+  flex: 0 0 1px !important;
+  width: 1px !important;
+  min-width: 1px !important;
+  opacity: 0 !important;
+}
+.ts-wrapper.ts-input-control.has-items.focus .ts-control > input {
+  opacity: 1 !important;
+}
+.ts-wrapper .ts-dropdown {
+  border-color: var(--claude-border);
+  border-radius: 8px;
+  box-shadow: var(--claude-shadow);
+  font-family: 'Sarabun', sans-serif;
+  font-size: 15px;
+  z-index: 2055;
+}
+.ts-dropdown .active {
+  background: rgba(61,79,107,0.08);
+  color: var(--claude-text);
+}
+.ts-wrapper.single .ts-control::after {
+  right: 12px;
+}
+.ts-badge-status {
+  display: inline-block;
+  width: 132px;
+  min-width: 132px;
+  max-width: 132px;
+  vertical-align: middle;
+}
+.ts-wrapper.ts-badge-status .ts-control,
+.ts-wrapper.form-select.ts-badge-status .ts-control {
+  width: 132px;
+  max-width: 132px;
+  min-height: 28px;
+  padding: 3px 28px 3px 12px;
+  border: 0;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  box-shadow: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ts-wrapper.ts-badge-status .item {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-dropdown.ts-badge-status {
+  min-width: 132px;
+}
+.ts-wrapper.ts-badge-status.status-waiting-parts .ts-control {
+  background: rgba(245,158,11,0.16);
+  color: #b45309;
+}
+.ts-wrapper.ts-badge-status.status-approved .ts-control {
+  background: rgba(16,185,129,0.16);
+  color: #047857;
+}
+.ts-wrapper.ts-badge-status.status-done .ts-control {
+  background: rgba(59,130,246,0.16);
+  color: #1d4ed8;
 }
 </style>

@@ -4,7 +4,8 @@
   "description": "Fleet & Stock Management migrated to Supabase & Netlify",
   "main": "index.js",
   "scripts": {
-    "dev": "node build.js && netlify dev"
+    "dev": "node build.js && netlify dev",
+    "local": "node run-local.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",

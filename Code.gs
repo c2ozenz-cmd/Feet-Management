@@ -626,7 +626,7 @@ function savePO(po, items) {
           row[colIdx('QuoteNo')] = quoteNo;
           row[colIdx('Plate')] = po.plate;
           row[colIdx('VatType')] = po.vatType;
-          row[colIdx('Status')] = data[i][colIdx('Status')] || 'รออนุมัติ';
+          row[colIdx('Status')] = po.status || data[i][colIdx('Status')] || 'รออนุมัติ';
           row[colIdx('CreatedBy')] = po.createdBy;
           row[colIdx('CreatedAt')] = data[i][colIdx('CreatedAt')] || new Date().toISOString();
           row[colIdx('createdBySignatureUrl')] = data[i][colIdx('createdBySignatureUrl')] || createdBySignatureUrl;
@@ -1435,14 +1435,20 @@ function getExpenseSummary(filter) {
     const from = filter?.from ? new Date(filter.from) : null;
     const to   = filter?.to   ? new Date(filter.to)   : null;
     if (to) to.setHours(23, 59, 59);
+    const plates = Array.isArray(filter?.plates)
+      ? filter.plates.filter(Boolean)
+      : (filter?.plate ? [filter.plate] : []);
+    const shopNames = Array.isArray(filter?.shopNames)
+      ? filter.shopNames.filter(Boolean)
+      : (filter?.shopName ? [filter.shopName] : []);
 
     const filteredPO = pos.filter(p => {
       if (p.status !== 'รับของแล้ว') return false;
       const d = new Date(p.issueDate);
       if (from && d < from) return false;
       if (to   && d > to)   return false;
-      if (filter?.plate    && p.plate    !== filter.plate)    return false;
-      if (filter?.shopName && p.shopName !== filter.shopName) return false;
+      if (plates.length && !plates.includes(p.plate)) return false;
+      if (shopNames.length && !shopNames.includes(p.shopName)) return false;
       return true;
     }).map(p => ({ ...p, total: poTotals[p.poNo] || 0, source: 'PO' }));
 
@@ -1470,7 +1476,7 @@ function getExpenseSummary(filter) {
         const d = new Date(dateStr);
         if (from && d < from) return;
         if (to   && d > to)   return;
-        if (filter?.plate && plate !== filter.plate) return;
+        if (plates.length && !plates.includes(plate)) return;
 
         manualRows.push({
           poNo      : 'MANUAL',

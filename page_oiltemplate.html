@@ -14,17 +14,22 @@
         <label class="form-label small fw-semibold">
           <i class="bi bi-bus-front me-1"></i>ทะเบียนรถ
         </label>
-        <select id="oilPlateSelect" class="form-select form-select-sm"
-          onchange="onOilPlateChange()">
-          <option value="">-- เลือกทะเบียน --</option>
-        </select>
+        <div class="combo-wrapper">
+          <input type="text" id="oilPlateSelect" class="form-control form-control-sm"
+            placeholder="พิมพ์หรือเลือกทะเบียน..."
+            oninput="showComboList('oilPlateSelect','oilPlateList', allBuses, 'plate'); onOilPlateChange()"
+            onkeydown="handleComboKey(event,'oilPlateSelect','oilPlateList')"
+            onchange="onOilPlateChange()"
+            autocomplete="off">
+          <ul id="oilPlateList" class="combo-list"></ul>
+        </div>
       </div>
 
       <div class="col-sm-3">
         <label class="form-label small fw-semibold">
           <i class="bi bi-droplet me-1"></i>โปรแกรม
         </label>
-        <select id="oilProgramSelect" class="form-select form-select-sm">
+        <select id="oilProgramSelect" class="form-select form-select-sm" data-no-tomselect>
           <option value="">-- เลือกโปรแกรม --</option>
           <option value="S">S — รายการสั้น</option>
           <option value="M">M — รายการกลาง</option>

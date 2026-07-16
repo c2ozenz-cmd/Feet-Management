@@ -5,6 +5,7 @@
 
 // ── GLOBAL STATE ──
 let currentUser = null;
+let appSessionToken = '';
 let allRepairs = [];
 let allPOs = [];
 let currentPOList = [];
@@ -43,6 +44,189 @@ function showLoading(text = 'กำลังประมวลผล...') {
   Swal.fire({ title: text, allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeJsString(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function initTomSelects(root = document) {
+  if (typeof TomSelect === 'undefined') return;
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('select:not([data-no-tomselect])').forEach(select => {
+    if (select.tomselect) return;
+    const instance = new TomSelect(select, {
+      create: false,
+      allowEmptyOption: true,
+      maxOptions: 1000,
+      sortField: [{ field: '$order' }],
+      dropdownParent: select.classList.contains('badge-status') ? 'body' : null,
+      plugins: select.multiple ? ['remove_button'] : [],
+      render: {
+        no_results: () => '<div class="no-results">ไม่พบข้อมูล</div>'
+      }
+    });
+    if (select.classList.contains('badge-status')) {
+      instance.wrapper.classList.add('ts-badge-status');
+      instance.dropdown.classList.add('ts-badge-status');
+      syncTomSelectBadgeClass(select);
+      select.addEventListener('change', () => {
+        syncTomSelectBadgeClass(select);
+        if (select.getAttribute('data-po-no')) changePOStatusDirect(select.getAttribute('data-po-no'), select.value);
+      });
+    }
+    if (select.style.width) instance.wrapper.style.width = select.style.width;
+    if (select.style.maxWidth) instance.wrapper.style.maxWidth = select.style.maxWidth;
+  });
+}
+
+function syncTomSelectBadgeClass(select) {
+  const wrapper = select?.tomselect?.wrapper;
+  if (!wrapper) return;
+  wrapper.classList.remove('status-waiting-parts', 'status-approved', 'status-done');
+  const selected = select.options[select.selectedIndex];
+  const cls = selected?.dataset?.cls || '';
+  if (cls) wrapper.classList.add(cls);
+}
+
+function destroyTomSelect(selectOrId) {
+  const select = typeof selectOrId === 'string' ? document.getElementById(selectOrId) : selectOrId;
+  if (select?.tomselect) select.tomselect.destroy();
+}
+
+function refreshTomSelect(selectOrId) {
+  const select = typeof selectOrId === 'string' ? document.getElementById(selectOrId) : selectOrId;
+  if (!select) return;
+  const value = select.value;
+  destroyTomSelect(select);
+  select.value = value;
+  initTomSelects(select.parentElement || document);
+}
+
+function setSelectValue(id, value, silent = true) {
+  const select = document.getElementById(id);
+  if (!select) return;
+  select.value = value ?? '';
+  if (select.tomselect) select.tomselect.setValue(select.value, silent);
+}
+
+function setSelectOptions(id, optionsHtml, value = '') {
+  const select = document.getElementById(id);
+  if (!select) return;
+  destroyTomSelect(select);
+  select.innerHTML = optionsHtml;
+  select.value = value || '';
+  initTomSelects(select.parentElement || document);
+  if (select.tomselect) select.tomselect.setValue(select.value, true);
+}
+
+function setSelectOptionValues(id, values, selectedValues = []) {
+  const select = document.getElementById(id);
+  if (!select) return;
+  const selected = new Set((Array.isArray(selectedValues) ? selectedValues : [selectedValues]).filter(Boolean).map(String));
+  destroyTomSelect(select);
+  select.innerHTML = [...new Set((values || []).filter(Boolean).map(v => String(v)))]
+    .map(value => `<option value="${escapeHtml(value)}" ${selected.has(value) ? 'selected' : ''}>${escapeHtml(value)}</option>`)
+    .join('');
+  initTomSelects(select.parentElement || document);
+  if (select.tomselect) select.tomselect.setValue([...selected].filter(value => select.tomselect.options[value]), true);
+}
+
+function getSelectValues(id) {
+  const select = document.getElementById(id);
+  if (!select) return [];
+  if (select.tomselect) {
+    const value = select.tomselect.getValue();
+    return (Array.isArray(value) ? value : [value]).filter(Boolean);
+  }
+  return Array.from(select.selectedOptions || []).map(opt => opt.value).filter(Boolean);
+}
+
+function initTomSelectInput(id, values, options = {}) {
+  if (typeof TomSelect === 'undefined') return;
+  const input = document.getElementById(id);
+  if (!input) return;
+  const current = input.value || '';
+  const items = [...new Set([current, ...(values || [])].filter(Boolean).map(v => String(v)))];
+  const tsOptions = items.map(value => ({ value, text: value }));
+  const closeSelectedTomSelect = ts => {
+    if (!ts) return;
+    setTimeout(() => {
+      ts.setTextboxValue('');
+      ts.refreshOptions(false);
+      ts.close();
+      ts.blur();
+    }, 0);
+  };
+
+  if (input.tomselect) {
+    input.tomselect.wrapper.classList.add('ts-input-control');
+    input.tomselect.clearOptions();
+    input.tomselect.addOptions(tsOptions);
+    input.tomselect.refreshOptions(false);
+    input.tomselect.setValue(current, true);
+    return;
+  }
+
+  const instance = new TomSelect(input, {
+    create: options.create !== false,
+    persist: false,
+    maxItems: options.maxItems || 1,
+    hideSelected: true,
+    closeAfterSelect: true,
+    maxOptions: 1000,
+    options: tsOptions,
+    valueField: 'value',
+    labelField: 'text',
+    searchField: ['text'],
+    render: {
+      no_results: () => '<div class="no-results">ไม่พบข้อมูล</div>'
+    },
+    onItemAdd: () => closeSelectedTomSelect(input.tomselect),
+    onChange: value => {
+      input.value = value || '';
+      if (input.tomselect) {
+        if (value) closeSelectedTomSelect(input.tomselect);
+      }
+      if (typeof options.onChange === 'function') options.onChange(value || '');
+    }
+  });
+  instance.wrapper.classList.add('ts-input-control');
+  instance.control_input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') closeSelectedTomSelect(instance);
+  });
+  if (input.style.width) instance.wrapper.style.width = input.style.width;
+  if (input.style.maxWidth) instance.wrapper.style.maxWidth = input.style.maxWidth;
+  instance.setValue(current, true);
+}
+
+function initComboTomSelects() {
+  ['repairPlate', 'poPlate', 'poShopName'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input?.tomselect) input.tomselect.destroy();
+  });
+}
+
+function setTomSelectInputValue(id, value, silent = true) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  input.value = value || '';
+  if (input.tomselect) {
+    if (input.value && !input.tomselect.options[input.value]) {
+      input.tomselect.addOption({ value: input.value, text: input.value });
+      input.tomselect.refreshOptions(false);
+    }
+    input.tomselect.setValue(input.value, silent);
+  }
+}
+
 function confirmAction(text, cb) {
   Swal.fire({
     title: 'ยืนยันการดำเนินการ?',
@@ -74,7 +258,9 @@ function doLogin() {
       Swal.close();
       if (res.success) {
         currentUser = res.user;
+        appSessionToken = res.token || '';
         sessionStorage.setItem('currentUser', JSON.stringify(res.user));
+        sessionStorage.setItem('appSessionToken', appSessionToken);
         initApp();
       } else { showToast('error', res.message); }
     })
@@ -83,6 +269,8 @@ function doLogin() {
 }
 
 function initApp() {
+  window.currentUser = currentUser;
+  window.appSessionToken = appSessionToken;
   document.getElementById('loginPage').classList.add('d-none');
   document.getElementById('mainApp').classList.remove('d-none');
   document.getElementById('topbarUserName').textContent = currentUser.name;
@@ -98,6 +286,7 @@ function initApp() {
   navigateTo('dashboard');
   loadNotifications(); 
   hydrateCurrentUserSignature();
+  setTimeout(() => initTomSelects(), 0);
 }
 
 function hydrateCurrentUserSignature() {
@@ -107,6 +296,7 @@ function hydrateCurrentUserSignature() {
       const u = (users || []).find(x => String(x.name || '').trim() === String(currentUser.name || '').trim());
       if (!u) return;
       currentUser.signatureUrl = u.signatureUrl || '';
+      window.currentUser = currentUser;
       sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
     })
     .withFailureHandler(() => {})
@@ -116,7 +306,11 @@ function hydrateCurrentUserSignature() {
 function logout() {
   confirmAction('คุณต้องการออกจากระบบ?', () => {
     currentUser = null;
+    appSessionToken = '';
+    window.currentUser = null;
+    window.appSessionToken = '';
     sessionStorage.removeItem('currentUser');
+    sessionStorage.removeItem('appSessionToken');
     document.getElementById('mainApp').classList.add('d-none');
     document.getElementById('loginPage').classList.remove('d-none');
     document.getElementById('loginUsername').value = '';
@@ -153,6 +347,7 @@ function navigateTo(page) {
     case 'oiltemplate': loadOilTemplate(); break;
     case 'linelog': loadLineLog(); break;
   }
+  setTimeout(() => initTomSelects(pageEl || document), 0);
 }
 
 // ── SIDEBAR TOGGLE ──
@@ -572,11 +767,17 @@ function loadSummary(showLoad = false) {
 }
 
 function _doLoadSummary(showLoad = false) {
+  const plate = document.getElementById('sumPlate').value.trim();
+  const shopName = document.getElementById('sumShop').value.trim();
+  const plates = plate ? [plate] : [];
+  const shopNames = shopName ? [shopName] : [];
   const filter = {
     from     : document.getElementById('sumFrom').value  || null,
     to       : document.getElementById('sumTo').value    || null,
-    plate    : document.getElementById('sumPlate').value || null,
-    shopName : document.getElementById('sumShop').value  || null
+    plates,
+    shopNames,
+    plate    : plate || null,
+    shopName : shopName || null
   };
 
   if (showLoad) showLoading('กำลังโหลดข้อมูล...'); // ← แสดงเฉพาะเมื่อสั่ง
@@ -679,7 +880,10 @@ function setQuickFilter(period) {
 
 function resetSummaryFilter() {
   ['sumFrom','sumTo','sumPlate','sumShop'].forEach(id => {
-    document.getElementById(id).value = '';
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.tomselect) el.tomselect.clear(true);
+    el.value = '';
   });
   loadSummary(true); // ← true
 }
@@ -742,12 +946,12 @@ function applyRepairPreset(kind) {
   if (!search || !status || !month) return;
   if (kind === 'clear') {
     search.value = '';
-    status.value = '';
+    setSelectValue('repairStatusFilter', '');
     month.value = '';
   } else {
     if (kind === 'month') month.value = currentMonthISO();
-    if (kind === 'waiting') status.value = 'รอดำเนินการ';
-    if (kind === 'parts') status.value = 'รออะไหล่';
+    if (kind === 'waiting') setSelectValue('repairStatusFilter', 'รอดำเนินการ');
+    if (kind === 'parts') setSelectValue('repairStatusFilter', 'รออะไหล่');
   }
   filterRepairs();
 }
@@ -783,7 +987,7 @@ function showRepairForm(repair = null) {
     document.getElementById('editRepairNo').value = repair.repairNo;
     document.getElementById('repairNo').value = repair.repairNo;
     document.getElementById('repairDate').value = repair.date;
-    document.getElementById('repairPlate').value = repair.plate;
+    setTomSelectInputValue('repairPlate', repair.plate);
     document.getElementById('repairChassis').value = repair.chassis || '';
     document.getElementById('repairMileage').value = repair.mileage || '';
     document.getElementById('repairOilProgram').value = repair.oilProgram || '';
@@ -806,7 +1010,7 @@ function showRepairForm(repair = null) {
     document.getElementById('editRepairNo').value = '';
     document.getElementById('repairNo').value = '';
     document.getElementById('repairDate').value = todayISO();
-    document.getElementById('repairPlate').value = '';
+    setTomSelectInputValue('repairPlate', '');
     document.getElementById('repairChassis').value = '';
     document.getElementById('repairMileage').value = '';
     document.getElementById('repairOilProgram').value = '';
@@ -815,6 +1019,8 @@ function showRepairForm(repair = null) {
     document.getElementById('repairStatusCard').style.display = 'none';
     renderRepairParts();
   }
+  initComboTomSelects();
+  setTimeout(() => initTomSelects(document.getElementById('repairFormView')), 0);
 }
 
 function editRepair(repairNo) {
@@ -1056,6 +1262,7 @@ function loadPOs() {
   // Load shops for dropdown
   google.script.run.withSuccessHandler(shops => {
     allShops = shops || [];
+    initComboTomSelects();
   }).getShops();
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
@@ -1101,8 +1308,8 @@ function poStatusSelectHtml(poNo, currentStatus) {
   const options = opts.map(o =>
     `<option value="${o.val}" data-cls="${o.cls}" ${o.val === currentStatus ? 'selected' : ''}>${o.label}</option>`
   ).join('');
-  return `<select class="badge-status ${cur.cls}"
-    onchange="changePOStatusDirect('${poNo}', this.value); this.className='badge-status '+this.options[this.selectedIndex].dataset.cls"
+  return `<select class="badge-status po-status-select ${cur.cls}" data-no-tomselect data-po-no="${poNo}"
+    onchange="changePOStatusDirect('${poNo}', this.value); this.className='badge-status po-status-select '+this.options[this.selectedIndex].dataset.cls"
     style="border:none;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;
            padding:4px 24px 4px 12px;border-radius:50px;outline:none;
            -webkit-appearance:none;-moz-appearance:none;appearance:none;
@@ -1186,7 +1393,7 @@ function renderPOTable(pos) {
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
       <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
-      <td data-label="สถานะ">${poStatusSelectHtml(p.poNo, p.status)}</td>
+      <td data-label="สถานะ" class="po-status-cell">${poStatusSelectHtml(p.poNo, p.status)}</td>
       <td data-label="การพิมพ์">
         ${p.printedAt
           ? `<span class="badge bg-success-light text-success"><i class="bi bi-printer-fill me-1"></i> พิมพ์แล้ว</span>`
@@ -1241,6 +1448,7 @@ function renderPOTable(pos) {
   }
   
   syncPOBulkActions();
+  setTimeout(() => initTomSelects(tbody), 0);
 }
 
 function changePOPage(page) {
@@ -1431,12 +1639,12 @@ function applyPOPreset(kind) {
   if (!search || !status || !month) return;
   if (kind === 'clear') {
     search.value = '';
-    status.value = '';
+    setSelectValue('poStatusFilter', '');
     month.value = '';
   } else {
     if (kind === 'month') month.value = currentMonthISO();
-    if (kind === 'pending') status.value = 'รออนุมัติ';
-    if (kind === 'received') status.value = 'รับของแล้ว';
+    if (kind === 'pending') setSelectValue('poStatusFilter', 'รออนุมัติ');
+    if (kind === 'received') setSelectValue('poStatusFilter', 'รับของแล้ว');
   }
   filterPOs();
 }
@@ -1462,15 +1670,16 @@ function showPOForm(po = null, options = {}) {
     document.getElementById('poFormBreadcrumb').textContent = isClone ? 'สร้างใหม่' : po.poNo;
     document.getElementById('editPONo').value          = isClone ? '' : po.poNo;
     document.getElementById('poNo').value              = isClone ? '' : po.poNo;
-    document.getElementById('poShopName').value        = po.shopName    || '';
+    document.getElementById('poCurrentStatus').value   = isClone ? 'รออนุมัติ' : (po.status || 'รออนุมัติ');
+    setTomSelectInputValue('poShopName', po.shopName || '');
     document.getElementById('poShopAddress').value     = po.shopAddress || '';
     document.getElementById('poTaxId').value           = po.taxId       || '';
     document.getElementById('poIssueDate').value       = po.issueDate   || '';
     document.getElementById('poQuoteDate').value       = po.quoteDate   || '';
     document.getElementById('poQuoteNo').value         = po.quoteNo     || '';
     document.getElementById('poRefRepairNo').value     = isClone ? '' : (po.refRepairNo || '');
-    document.getElementById('poPlate').value           = isClone ? '' : (po.plate || '');
-    document.getElementById('poVatType').value         = po.vatType     || 'none';
+    setTomSelectInputValue('poPlate', isClone ? '' : (po.plate || ''));
+    setSelectValue('poVatType', po.vatType || 'none');
     document.getElementById('poGrpRef').value          = po.grpRef || '';
 
     const autoBadge  = document.getElementById('quoteNoAutoBadge');
@@ -1505,15 +1714,16 @@ function showPOForm(po = null, options = {}) {
     document.getElementById('editPONo').value = '';
     document.getElementById('poNo').value = '';
     document.getElementById('poGrpRef').value = '';
+    document.getElementById('poCurrentStatus').value = 'รออนุมัติ';
     document.getElementById('poIssueDate').value = todayISO();
-    document.getElementById('poShopName').value = '';
+    setTomSelectInputValue('poShopName', '');
     document.getElementById('poShopAddress').value = '';
     document.getElementById('poTaxId').value = '';
     document.getElementById('poQuoteDate').value = '';
     document.getElementById('poQuoteNo').value = '';
     document.getElementById('poRefRepairNo').value = pendingPORepairNo || '';
-    document.getElementById('poPlate').value = pendingPOPlate || '';
-    document.getElementById('poVatType').value = 'none';
+    setTomSelectInputValue('poPlate', pendingPOPlate || '');
+    setSelectValue('poVatType', 'none');
     document.getElementById('poStatusCard').style.display = 'none';
     if (linkedBtn) linkedBtn.style.display = 'none';
     const autoBadge  = document.getElementById('quoteNoAutoBadge');
@@ -1525,6 +1735,8 @@ function showPOForm(po = null, options = {}) {
     renderPOItems();
     pendingPORepairNo = null; pendingPOPlate = null;
   }
+  initComboTomSelects();
+  setTimeout(() => initTomSelects(document.getElementById('poFormView')), 0);
 }
 
 function clearQuoteNo() {
@@ -1548,6 +1760,7 @@ function savePO() {
     refRepairNo  : document.getElementById('poRefRepairNo').value,
     plate        : document.getElementById('poPlate').value,
     vatType      : document.getElementById('poVatType').value,
+    status       : document.getElementById('poCurrentStatus').value || 'รออนุมัติ',
     grpRef       : (document.getElementById('poGrpRef') ? document.getElementById('poGrpRef').value : ''),
     createdBy    : currentUser?.name || '',
     createdBySignatureUrl : currentUser?.signatureUrl || ''
@@ -1569,8 +1782,6 @@ function savePO() {
         // อัปเดต grpRef ใน hidden field
         const grpEl = document.getElementById('poGrpRef');
         if (grpEl && res.grpRef) grpEl.value = res.grpRef;
-
-        loadPOs();
 
         // สร้าง PDF อัตโนมัติ
         showLoading('กำลังสร้าง PDF...');
@@ -1604,11 +1815,11 @@ function savePO() {
                     if (savedPO) {
                       showPOForm(savedPO, { cloneFrom: true });
                     } else {
-                      showPOList();
+                      loadPOs();
                     }
                   }).getPOs();
                 } else {
-                  showPOList();
+                  loadPOs();
                 }
               });
             } else {
@@ -1620,7 +1831,7 @@ function savePO() {
                   ? `บันทึก PO ${res.poNo} และสร้าง PDF สำเร็จ`
                   : `บันทึก PO ${res.poNo} สำเร็จ แต่สร้าง PDF ไม่สำเร็จ: ${pdfRes.message || ''}`,
                 confirmButtonColor: '#3B82F6'
-              }).then(() => showPOList());
+              }).then(() => loadPOs());
             }
           })
           .withFailureHandler(err => {
@@ -1630,7 +1841,7 @@ function savePO() {
               title: 'บันทึก PO เรียบร้อย',
               text: `บันทึก PO ${res.poNo} สำเร็จ แต่สร้าง PDF ล้มเหลว: ${err.message}`,
               confirmButtonColor: '#3B82F6'
-            }).then(() => showPOList());
+            }).then(() => loadPOs());
           })
           .generateAndSavePOPdf(res.poNo);
 
@@ -1798,6 +2009,8 @@ function _doChangePOStatus(poNo, status, syncStock) {
 
       showToast('success', 'อัปเดตสถานะเรียบร้อย');
       renderPOStepper(status);
+      const statusEl = document.getElementById('poCurrentStatus');
+      if (statusEl) statusEl.value = status;
 
       if (status === 'อนุมัติแล้ว') {
         showLoading('กำลังสร้าง PDF พร้อมลายเซ็น...');
@@ -1951,10 +2164,11 @@ function _doChangePOStatusDirect(poNo, status, syncStock) {
     .updatePOStatus(poNo, status, currentUser.name, syncStock);
 }
 
-function previewPO() {
+async function previewPO() {
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
   const poNo = document.getElementById('editPONo').value;
   const existingPO = allPOs.find(p => p.poNo === poNo) || {};
+  const currentSignatureUrl = await getCurrentUserSignatureUrl();
   const po = {
     poNo        : poNo || 'PREVIEW',
     shopName    : document.getElementById('poShopName').value,
@@ -1967,7 +2181,7 @@ function previewPO() {
     plate       : document.getElementById('poPlate').value,
     vatType     : document.getElementById('poVatType').value,
     createdBy   : currentUser?.name || '',
-    createdBySignatureUrl : existingPO.createdBySignatureUrl || currentUser?.signatureUrl || '',
+    createdBySignatureUrl : existingPO.createdBySignatureUrl || currentSignatureUrl || '',
     approvedBy  : existingPO.approvedBy || '' 
   };
   google.script.run
@@ -1979,9 +2193,114 @@ function previewPO() {
     .getAllSettings();
 }
 
+function getCurrentUserSignatureUrl() {
+  return new Promise(resolve => {
+    if (!currentUser) { resolve(''); return; }
+    if (currentUser.signatureUrl) { resolve(currentUser.signatureUrl); return; }
+
+    google.script.run
+      .withSuccessHandler(users => {
+        const curId = String(currentUser.id || '').trim();
+        const curName = String(currentUser.name || '').trim();
+        const curUsername = String(currentUser.username || '').trim();
+        const u = (users || []).find(x =>
+          (curId && String(x.id || '').trim() === curId) ||
+          (curUsername && String(x.username || '').trim() === curUsername) ||
+          (curName && String(x.name || '').trim() === curName)
+        );
+        currentUser.signatureUrl = u ? (u.signatureUrl || '') : '';
+        window.currentUser = currentUser;
+        sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+        resolve(currentUser.signatureUrl || '');
+      })
+      .withFailureHandler(() => resolve(''))
+      .getUsers();
+  });
+}
+
 
 function getDirectPdfUrl(url) {
   return url || '';
+}
+
+function addPdfCacheBuster(url) {
+  if (!url) return '';
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}v=${Date.now()}`;
+}
+
+function getPOPdfStorageCandidates(poNo) {
+  const base = (window.SUPABASE_URL || '').replace(/\/$/, '');
+  if (!base || !poNo) return [];
+  return [
+    `${base}/storage/v1/object/public/pdf-orders/${encodeURIComponent(`PO_${poNo}.pdf`)}`,
+    `${base}/storage/v1/object/public/pdf-orders/${encodeURIComponent(`PO_${poNo}`)}`
+  ];
+}
+
+async function findExistingPdfUrl(candidates) {
+  for (const url of candidates) {
+    try {
+      const res = await fetch(addPdfCacheBuster(url), { method: 'HEAD', cache: 'no-store' });
+      if (res.ok) return url;
+    } catch (e) {
+      // Public Storage usually supports HEAD. If the browser blocks the check,
+      // keep trying candidates and fall back below.
+    }
+  }
+  return '';
+}
+
+async function resolveApprovedPOPdfUrl(po) {
+  if (!po || !po.poNo) return '';
+
+  const storageCandidates = getPOPdfStorageCandidates(po.poNo);
+  const existingUrl = String(po.pdfUrl || '').trim();
+  const candidates = existingUrl
+    ? [...storageCandidates, existingUrl]
+    : storageCandidates;
+  const foundStorageUrl = await findExistingPdfUrl(candidates);
+  if (foundStorageUrl) return foundStorageUrl;
+  return '';
+}
+
+async function openApprovedPOPdf(po, options = {}) {
+  if (!po) return false;
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถเปิดหน้าต่างได้',
+      text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ เพื่อเปิดไฟล์ PDF',
+      confirmButtonText: 'รับทราบ'
+    });
+    return false;
+  }
+
+  win.document.write(`<!DOCTYPE html><html><head><title>${po.poNo}</title></head><body style="font-family:sans-serif;padding:24px">Opening approved PDF for ${po.poNo}...</body></html>`);
+  win.document.close();
+
+  const directUrl = await resolveApprovedPOPdfUrl(po);
+  if (!directUrl) {
+    try { win.close(); } catch (e) {}
+    showToast('error', 'ไม่พบไฟล์ PDF สำหรับ PO นี้');
+    return false;
+  }
+
+  win.location.href = addPdfCacheBuster(getDirectPdfUrl(directUrl));
+  google.script.run
+    .withSuccessHandler(() => {
+      loadPOs();
+      if (options.closeModal) {
+        const modalEl = document.getElementById('printModal');
+        const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+        if (modal) modal.hide();
+      }
+      showToast('success', 'เปิดไฟล์ PDF สำหรับพิมพ์แล้ว');
+    })
+    .markPOAsPrinted(po.poNo);
+  return true;
 }
 
 function previewPOFromNo(poNo) {
@@ -1991,26 +2310,8 @@ function previewPOFromNo(poNo) {
   if (!po) return;
 
   // 🔗 หากมีไฟล์ PDF อยู่ใน Google Drive แล้ว ให้เปิดลิงก์ PDF โดยตรงแทน เพื่อให้ได้ไฟล์ที่ตรงกับบอท
-  if (po.pdfUrl) {
-    const directUrl = getDirectPdfUrl(po.pdfUrl);
-    const win = window.open(directUrl, '_blank');
-    if (win) {
-      google.script.run
-        .withSuccessHandler(() => {
-          loadPOs();
-          showToast('success', 'เปิดไฟล์ PDF ต้นฉบับและบันทึกสถานะพิมพ์แล้ว');
-        })
-        .markPOAsPrinted(poNo);
-    } else {
-      Swal.fire({
-        icon: 'warning',
-        title: 'ไม่สามารถเปิดหน้าต่างได้',
-        text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ เพื่อเปิดไฟล์ PDF',
-        confirmButtonText: 'รับทราบ'
-      });
-    }
-    return;
-  }
+  openApprovedPOPdf(po);
+  return;
 
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
   google.script.run
@@ -2336,30 +2637,8 @@ function printPO() {
   if (printedNos.length === 1) {
     const targetPoNo = printedNos[0];
     const po = allPOs.find(p => p.poNo === targetPoNo);
-    if (po && po.pdfUrl) {
-      const directUrl = getDirectPdfUrl(po.pdfUrl);
-      const win = window.open(directUrl, '_blank');
-      if (!win) {
-        Swal.fire({
-          icon: 'warning',
-          title: 'ไม่สามารถเปิดหน้าต่างได้',
-          text: 'กรุณาอนุญาต Pop-up สำหรับเว็บนี้ เพื่อเปิดไฟล์ PDF',
-          confirmButtonText: 'รับทราบ'
-        });
-        return;
-      }
-      // อัปเดตสถานะการพิมพ์
-      google.script.run
-        .withSuccessHandler(() => {
-          loadPOs();
-          const modalEl = document.getElementById('printModal');
-          if (modalEl) {
-            const modal = bootstrap.Modal.getInstance(modalEl);
-            if (modal) modal.hide();
-          }
-          showToast('success', 'เปิดไฟล์ PDF ต้นฉบับและบันทึกสถานะพิมพ์แล้ว');
-        })
-        .markPOAsPrinted(targetPoNo);
+    if (po) {
+      openApprovedPOPdf(po, { closeModal: true });
       return;
     }
   }
@@ -2564,7 +2843,7 @@ function applyStockPreset(kind) {
   const status = document.getElementById('stockStatusFilter');
   if (!search || !status) return;
   search.value = '';
-  status.value = kind === 'clear' ? '' : kind;
+  setSelectValue('stockStatusFilter', kind === 'clear' ? '' : kind);
   filterStock();
 }
 
@@ -3075,6 +3354,8 @@ function viewPartHistory(partName) {
 }
 
 // ── USERS ──
+let userModalToken = 0;
+
 function loadUsers() {
   google.script.run.withSuccessHandler(users => {
     const tbody = document.getElementById('usersTableBody');
@@ -3091,7 +3372,7 @@ function loadUsers() {
         <td data-label="บทบาท"><span class="badge-status ${u.role === 'admin' ? 'status-approved' : 'status-waiting-parts'}">${u.role === 'admin' ? 'Admin' : 'User'}</span></td>
         <td data-label="สถานะ"><span class="badge-status ${u.status === 'active' ? 'status-done' : 'status-waiting-parts'}">${u.status === 'active' ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span></td>
         <td data-label="">
-          <div class="d-flex gap-1 justify-content-end">
+          <div class="user-actions d-flex gap-1 justify-content-center align-items-center">
             <button class="btn btn-sm btn-outline-primary" onclick="showUserModal('${u.id}')"><i class="bi bi-pencil"></i></button>
             ${u.id !== currentUser?.id ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')"><i class="bi bi-trash"></i></button>` : ''}
           </div>
@@ -3101,35 +3382,48 @@ function loadUsers() {
 }
 
 function showUserModal(id = null) {
+  const token = ++userModalToken;
   document.getElementById('editUserId').value = '';
   document.getElementById('userUsername').value = '';
   document.getElementById('userPassword').value = '';
   document.getElementById('userName').value = '';
-  document.getElementById('userRole').value = 'user';
-  document.getElementById('userStatus').value = 'active';
+  setSelectValue('userRole', 'user');
+  setSelectValue('userStatus', 'active');
   document.getElementById('userLineUserId').value = '';
   document.getElementById('userSignatureUrl').value = '';
+  document.getElementById('userSignatureFile').value = '';
+  document.getElementById('userSignatureFile').disabled = false;
+  setSignaturePreview('');
   document.getElementById('userModalTitle').textContent = id ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้';
   document.getElementById('pwRequired').style.display = id ? 'none' : '';
 
   if (id) {
     google.script.run.withSuccessHandler(users => {
+      if (token !== userModalToken) return;
       const u = users.find(x => x.id === id);
       if (u) {
         document.getElementById('editUserId').value = u.id;
         document.getElementById('userUsername').value = u.username;
         document.getElementById('userName').value = u.name;
-        document.getElementById('userRole').value = u.role;
-        document.getElementById('userStatus').value = u.status;
+        setSelectValue('userRole', u.role);
+        setSelectValue('userStatus', u.status);
         document.getElementById('userLineUserId').value = u.lineUserId || '';
         document.getElementById('userSignatureUrl').value = u.signatureUrl || '';
+        setSignaturePreview(u.signatureUrl || '');
       }
     }).getUsers();
   }
   new bootstrap.Modal(document.getElementById('userModal')).show();
+  setTimeout(() => initTomSelects(document.getElementById('userModal')), 0);
 }
 
-function saveUser() {
+document.getElementById('userModal')?.addEventListener('hidden.bs.modal', () => {
+  userModalToken++;
+  const input = document.getElementById('userSignatureFile');
+  if (input) input.disabled = false;
+});
+
+async function saveUser() {
   const user = {
     id           : document.getElementById('editUserId').value,
     username     : document.getElementById('userUsername').value,
@@ -3143,18 +3437,108 @@ function saveUser() {
   if (!user.username || !user.name || (!user.id && !user.password)) {
     showToast('warning', 'กรุณากรอกข้อมูลให้ครบ'); return;
   }
-  showLoading('กำลังบันทึก...');
+  const signatureInput = document.getElementById('userSignatureFile');
+  const signatureFile = signatureInput?.files?.[0] || null;
+  let uploadedSignaturePath = '';
+  showLoading(signatureFile ? 'กำลังอัปโหลดลายเซ็นและบันทึก...' : 'กำลังบันทึก...');
+
+  if (signatureFile) {
+    try {
+      const uploadedSignature = await uploadUserSignatureToBucket(signatureFile, user.username, user.id);
+      user.signatureUrl = uploadedSignature.publicUrl;
+      uploadedSignaturePath = uploadedSignature.path || '';
+      document.getElementById('userSignatureUrl').value = user.signatureUrl;
+    } catch (e) {
+      Swal.close();
+      showToast('error', 'อัปโหลดลายเซ็นล้มเหลว: ' + e.message);
+      return;
+    }
+  }
+
   google.script.run
-    .withSuccessHandler(res => {
+    .withSuccessHandler(async res => {
       Swal.close();
       if (res.success) {
+        if (currentUser && (user.id === currentUser.id || user.username === currentUser.username)) {
+          currentUser.signatureUrl = user.signatureUrl || '';
+          currentUser.name = user.name || currentUser.name;
+          window.currentUser = currentUser;
+          sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
+        }
         showToast('success', 'บันทึกเรียบร้อย');
         bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
         loadUsers();
-      } else { showToast('error', res.message); }
+      } else {
+        if (uploadedSignaturePath) await cleanupUploadedSignature(uploadedSignaturePath);
+        showToast('error', res.message);
+      }
     })
-    .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+    .withFailureHandler(async e => {
+      if (uploadedSignaturePath) await cleanupUploadedSignature(uploadedSignaturePath);
+      Swal.close();
+      showToast('error', e.message);
+    })
     .saveUser(user);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(reader.error || new Error('Cannot read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadUserSignatureToBucket(file, username, userId) {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('กรุณาเลือกไฟล์รูปภาพเท่านั้น');
+  }
+  const token = appSessionToken || sessionStorage.getItem('appSessionToken') || window.appSessionToken || '';
+  if (!token) {
+    throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+  }
+
+  const base64 = await fileToBase64(file);
+  const res = await fetch('/.netlify/functions/upload-signature', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      username,
+      userId,
+      fileName: file.name,
+      contentType: file.type || 'image/png',
+      base64
+    })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || 'ไม่สามารถอัปโหลดไฟล์ได้');
+  }
+  return {
+    publicUrl: json.publicUrl || '',
+    path: json.path || ''
+  };
+}
+
+async function cleanupUploadedSignature(path) {
+  const token = appSessionToken || sessionStorage.getItem('appSessionToken') || window.appSessionToken || '';
+  if (!token || !path) return;
+  try {
+    await fetch('/.netlify/functions/upload-signature', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ path })
+    });
+  } catch (e) {
+    console.warn('Failed to clean up uploaded signature:', e);
+  }
 }
 
 function deleteUser(id) {
@@ -3171,55 +3555,23 @@ function deleteUser(id) {
   });
 }
 
-function previewSignature() {
-  const url = document.getElementById('userSignatureUrl').value.trim();
+function setSignaturePreview(url) {
   const box = document.getElementById('sigPreviewBox');
   const img = document.getElementById('sigPreview');
+  if (!box || !img) return;
   if (url) {
+    box.classList.remove('is-empty');
     img.src = parseDriveUrl(url);
-    box.style.display = '';
   } else {
-    box.style.display = 'none';
+    box.classList.add('is-empty');
+    img.removeAttribute('src');
   }
 }
 
-async function uploadSignatureFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const username = document.getElementById('userUsername').value.trim();
-  if (!username) {
-    showToast('warning', 'กรุณากรอกชื่อผู้ใช้ (Username) ก่อนเลือกรูปภาพ เพื่อตั้งชื่อไฟล์ลายเซ็นต์');
-    input.value = '';
-    return;
-  }
-
-  showLoading('กำลังอัปโหลดรูปลายเซ็นต์...');
-  
-  try {
-    const ext = file.name.split('.').pop() || 'png';
-    const filePath = `sig-${username}-${Date.now()}.${ext}`;
-    
-    const { data, error } = await window.supabaseClient.storage
-      .from('signatures')
-      .upload(filePath, file, { cacheControl: '3600', upsert: true });
-
-    if (error) throw error;
-
-    const { data: { publicUrl } } = window.supabaseClient.storage
-      .from('signatures')
-      .getPublicUrl(filePath);
-
-    document.getElementById('userSignatureUrl').value = publicUrl;
-    previewSignature();
-    showToast('success', 'อัปโหลดรูปลายเซ็นต์เรียบร้อยแล้ว');
-  } catch (e) {
-    showToast('error', 'อัปโหลดล้มเหลว: ' + e.message);
-  } finally {
-    Swal.close();
-  }
+function previewSignature() {
+  const url = document.getElementById('userSignatureUrl').value.trim();
+  setSignaturePreview(url);
 }
-
 
 function copyLineId() {
   const val = document.getElementById('userLineUserId').value;
@@ -3927,6 +4279,7 @@ function pickPOCustomPart() {
 function loadShops() {
   google.script.run.withSuccessHandler(shops => {
     allShops = shops || [];
+    initComboTomSelects();
     renderShopTable(shops);
   }).getShops();
 }
@@ -4052,12 +4405,12 @@ function deleteShop(id) {
 function loadBusPlates() {
   google.script.run.withSuccessHandler(buses => {
     allBuses = buses || [];
+    initComboTomSelects();
     const poPlateEl = document.getElementById('poPlate');
     if (poPlateEl && poPlateEl.tagName === 'SELECT') {
       const cur = poPlateEl.value;
-      poPlateEl.innerHTML = '<option value="">-- เลือกทะเบียน --</option>' +
-        buses.map(b => `<option value="${b.plate}">${b.plate}</option>`).join('');
-      if (cur) poPlateEl.value = cur;
+      setSelectOptions('poPlate', '<option value="">-- เลือกทะเบียน --</option>' +
+        buses.map(b => `<option value="${b.plate}">${b.plate}</option>`).join(''), cur);
     }
   }).getBusPlates();
 }
@@ -4083,26 +4436,62 @@ function showComboList(inputId, listId, data, field) {
       new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),
       '<mark>$1</mark>'
     );
-    return `<li onmousedown="selectCombo('${inputId}','${listId}','${val.replace(/'/g,"\\'")}')">
+    return `<li class="combo-option" data-value="${escapeHtml(val)}" onmousedown="selectCombo('${inputId}','${listId}','${val.replace(/'/g,"\\'")}')">
       ${highlighted}
     </li>`;
   }).join('');
 
   list.classList.add('show');
+  setComboActive(list, 0);
 }
 
 function selectCombo(inputId, listId, value) {
   const input = document.getElementById(inputId);
   if (input) {
     input.value = value;
+    input.blur();
     input.dispatchEvent(new Event('change'));
   }
   closeComboList(listId);
 }
 
+function setComboActive(list, index) {
+  const items = Array.from(list.querySelectorAll('.combo-option'));
+  if (!items.length) return;
+  const safeIndex = Math.max(0, Math.min(index, items.length - 1));
+  items.forEach(item => item.classList.remove('active'));
+  items[safeIndex].classList.add('active');
+  items[safeIndex].scrollIntoView({ block: 'nearest' });
+}
+
+function handleComboKey(event, inputId, listId) {
+  const list = document.getElementById(listId);
+  if (!list || !list.classList.contains('show')) return;
+  const items = Array.from(list.querySelectorAll('.combo-option'));
+  if (!items.length) return;
+  const current = Math.max(0, items.findIndex(item => item.classList.contains('active')));
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    setComboActive(list, current + 1);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    setComboActive(list, current - 1);
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    const active = items[current] || items[0];
+    selectCombo(inputId, listId, active.dataset.value || active.textContent.trim());
+  } else if (event.key === 'Escape') {
+    closeComboList(listId);
+  }
+}
+
 function closeComboList(listId) {
   const list = document.getElementById(listId);
-  if (list) list.classList.remove('show');
+  if (list) {
+    list.classList.remove('show');
+    list.querySelectorAll('.combo-option.active').forEach(item => item.classList.remove('active'));
+  }
 }
 
 // ปิดทุก combo เมื่อคลิกที่อื่น
@@ -4123,11 +4512,9 @@ function loadOilTemplate() {
     document.body.appendChild(modal);
   }
 
-  // โหลด bus plates สำหรับ dropdown
+  // โหลด bus plates สำหรับ autocomplete
   google.script.run.withSuccessHandler(buses => {
-    const sel = document.getElementById('oilPlateSelect');
-    sel.innerHTML = '<option value="">-- เลือกทะเบียน --</option>' +
-      buses.map(b => `<option value="${b.plate}">${b.plate}</option>`).join('');
+    allBuses = buses || [];
   }).getBusPlates();
 }
 
@@ -4331,7 +4718,7 @@ function onOilPlateChange() {
 
 // ── คลิก badge โปรแกรมเพื่อโหลดทันที ──
 function quickLoadProgram(program) {
-  document.getElementById('oilProgramSelect').value = program;
+  setSelectValue('oilProgramSelect', program);
   loadOilTemplateItems();
 }
 
@@ -4885,6 +5272,7 @@ function confirmClearLineLogs() {
 // ── AUTO RESTORE SESSION ──
 (function() {
   const saved = sessionStorage.getItem('currentUser');
+  appSessionToken = sessionStorage.getItem('appSessionToken') || '';
   if (saved) {
     try {
       currentUser = JSON.parse(saved);

@@ -95,7 +95,8 @@
           <div class="combo-wrapper">
             <input type="text" id="repairPlate" class="form-control"
               placeholder="พิมพ์หรือเลือกทะเบียน..."
-              oninput="showComboList('repairPlate','plateComboList', allBuses, 'plate')"
+              oninput="showComboList('repairPlate','plateComboList', allBuses, 'plate'); onPlateChange()"
+              onkeydown="handleComboKey(event,'repairPlate','plateComboList')"
               onchange="onPlateChange()"
               autocomplete="off"
               required>

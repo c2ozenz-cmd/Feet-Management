@@ -637,3 +637,226 @@ Logic ป้องกันข้อผิดพลาดที่มีอย�
 | `sidebar.html` | เมนูด้านข้าง |
 | `topbar.html` | แถบบน |
 
+## 20. Netlify + Supabase Migration Layer
+
+นอกจากโค้ด Google Apps Script เดิม โปรเจกต์นี้มีไฟล์สำหรับย้ายระบบไปทำงานบน Netlify และ Supabase ด้วย โดยแนวคิดคือยังใช้หน้าเว็บเดิมให้มากที่สุด แต่เปลี่ยน backend จาก `google.script.run`/Google Sheets ไปเป็น Supabase และ Netlify Functions
+
+### ไฟล์ config และ build
+
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `package.json` | กำหนด dependency และ script `npm run dev` |
+| `netlify.toml` | ตั้งค่า Netlify ให้ publish จาก `public` และใช้ serverless functions จาก `functions` |
+| `build.js` | compile `Index.html` กับ `include(...)` ของ Apps Script ให้กลายเป็น static HTML ใน `public/index.html` |
+| `public/supabase-bridge.js` | จำลอง `google.script.run` ให้เรียก Supabase แทน |
+
+`build.js` จะทำงานหลัก ๆ ดังนี้:
+
+1. อ่าน `Index.html`
+2. หา syntax `<?= include('...'); ?>`
+3. แทนที่ด้วยเนื้อหาจากไฟล์ `.html` จริง เช่น `Css.html`, `Js.html`, `page_*.html`
+4. ถ้า include เป็น `Js.html` จะใส่ `<script src="supabase-bridge.js"></script>` เพิ่มก่อน
+5. inject Supabase SDK CDN และค่า `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+6. เขียนผลลัพธ์ไปที่ `public/index.html`
+
+## 21. Supabase Database Schema
+
+`supabase_schema.sql` สร้างตาราง PostgreSQL ที่แทน Google Sheets เดิม
+
+ตารางหลัก:
+
+- `profiles`: ผู้ใช้, role, LINE User ID, signature
+- `buses`: ข้อมูลรถ
+- `shops`: ร้านค้า
+- `stock`: สต็อกอะไหล่
+- `repairs`: ใบแจ้งซ่อม
+- `repair_parts`: รายการอะไหล่ในงานซ่อม
+- `purchase_orders`: ใบสั่งซื้อ
+- `po_items`: รายการสินค้าใน PO
+- `stock_logs`: ประวัติรับเข้า/ตัดออก
+- `oil_templates`: template อะไหล่/น้ำมัน
+- `settings`: key/value config
+- `line_logs`: log การทำงาน LINE
+
+Storage bucket:
+
+- `signatures`
+- `company-assets`
+- `pdf-orders`
+
+หมายเหตุ: schema ปัจจุบันปิด RLS ทุกตาราง เพื่อให้ทำงานคล้าย Google Sheets ที่ backend เข้าถึงตรงได้ง่าย แต่ถ้าขึ้น production จริงควรทบทวนเรื่องสิทธิ์และ policy อีกครั้ง
+
+## 22. Supabase Bridge ฝั่ง Frontend
+
+`public/supabase-bridge.js` เป็น compatibility layer ที่ทำให้โค้ดเดิมใน `Js.html` ยังเรียกแบบนี้ได้:
+
+```js
+google.script.run
+  .withSuccessHandler(...)
+  .withFailureHandler(...)
+  .someFunction(...)
+```
+
+แต่เบื้องหลังเปลี่ยนเป็น Supabase query แทน
+
+สิ่งที่ bridge ทำ:
+
+- สร้าง Supabase client จาก `window.SUPABASE_URL` และ `window.SUPABASE_ANON_KEY`
+- สร้าง class `ScriptRunBridge`
+- รองรับ pattern `withSuccessHandler` / `withFailureHandler`
+- map function เดิมบางส่วน เช่น login, settings, users, shops, buses ไปยัง table Supabase
+
+ตัวอย่าง mapping:
+
+- `login(username, password)` อ่านจาก `profiles`
+- `getUsers()` อ่านจาก `profiles`
+- `saveUser(user)` insert/update `profiles`
+- `getShops()` อ่านจาก `shops`
+- `saveShop(shop)` insert/update `shops`
+- `getFullBuses()` อ่านจาก `buses`
+
+## 23. Netlify Functions
+
+โฟลเดอร์ `functions` เป็น backend serverless สำหรับงานที่ไม่ควรทำจาก frontend ตรง ๆ เช่น LINE, PDF, admin auth
+
+### `functions/line-webhook.js`
+
+เป็น webhook หลักของ LINE บน Netlify
+
+ทำงานคล้าย `Line.gs` เดิม:
+
+1. รับ `POST` จาก LINE
+2. วน events
+3. ถ้าเป็น `postback` เรียก `handlePostback`
+4. ถ้าเป็น text message เรียก `handleTextMessage`
+5. ใช้ Supabase service role key เพื่ออ่าน/เขียนข้อมูล
+
+Logic สำคัญ:
+
+- ช่างกด `tech_done` เพื่อเปลี่ยนงานเป็น `เสร็จแล้ว`
+- ช่างกด `tech_waiting` เพื่อเปลี่ยนงานเป็น `รออะไหล่`
+- ช่างกด `tech_report` เพื่อเปิด pending report
+- admin กดอนุมัติ repair แล้วเปลี่ยนเป็น `กำลังซ่อม`
+- admin กดอนุมัติ PO แล้วเปลี่ยนเป็น `อนุมัติแล้ว`
+- หลังอนุมัติ PO จะเรียก `generate-pdf` เพื่อสร้าง PDF แล้วส่ง Flex กลับ LINE
+
+### `functions/line-send-repair.js`
+
+ส่งใบแจ้งซ่อมเข้า LINE group
+
+ขั้นตอน:
+
+1. รับ `repairNo` จาก query string
+2. อ่าน repair จาก Supabase table `repairs`
+3. อ่าน `LINE_GROUP_ID_SERVICE` จาก `settings`
+4. สร้าง Repair Flex Message
+5. Push เข้า LINE group
+6. บันทึกเวลาส่งไว้ใน `settings` key รูปแบบ `linesent_repair:{repairNo}`
+
+### `functions/line-send-po.js`
+
+ส่ง PO เข้า LINE group
+
+ขั้นตอน:
+
+1. รับ `poNo`
+2. อ่าน PO จาก `purchase_orders`
+3. อ่าน items จาก `po_items`
+4. อ่าน `LINE_GROUP_ID_PO`
+5. สร้าง PO Flex Message
+6. Push เข้า LINE group
+7. อัปเดต `line_sent_at` ใน `purchase_orders`
+
+### `functions/generate-pdf.js`
+
+สร้าง PDF ใบสั่งซื้อบน Netlify ด้วย `pdfkit`
+
+ขั้นตอน:
+
+1. รับ `poNo`
+2. อ่าน PO จาก `purchase_orders`
+3. อ่าน items จาก `po_items`
+4. อ่าน settings จาก `settings`
+5. ดาวน์โหลดฟอนต์ Sarabun จาก Google Fonts
+6. สร้าง PDF ด้วย `PDFDocument`
+7. ดึง logo/stamp/signature จาก URL ถ้ามี
+8. upload PDF ไป Supabase Storage bucket `pdf-orders`
+9. เอา public URL กลับมาอัปเดต `purchase_orders.pdf_url`
+
+### `functions/admin-create-user.js`
+
+ใช้ Supabase Auth Admin API สร้างผู้ใช้
+
+- รับ `email`, `password`, `username`, `name`, `role`
+- เรียก `supabase.auth.admin.createUser`
+- confirm email ให้ทันที
+- คืน user id
+
+### `functions/admin-delete-user.js`
+
+ใช้ Supabase Auth Admin API ลบผู้ใช้
+
+- รับ `id` จาก query string
+- เรียก `supabase.auth.admin.deleteUser(id)`
+
+## 24. Migration Helper
+
+`migration_helper.gs` เป็นสคริปต์ Google Apps Script สำหรับย้ายข้อมูลจาก Google Sheets ไป Supabase
+
+Flow หลัก:
+
+1. ตั้งค่า `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY`
+2. เรียก `runDataMigration()`
+3. เก็บชุด key ที่ valid ก่อน เช่น plate, repair no, PO no เพื่อเลี่ยง foreign key error
+4. migrate ตามลำดับ dependency:
+   - settings
+   - buses
+   - shops
+   - stock
+   - profiles
+   - repairs
+   - repair parts
+   - purchase orders
+   - PO items
+   - oil templates
+5. มี helper สำหรับ upload ไฟล์จาก Google Drive ไป Supabase Storage เช่น signature/company assets/PDF
+
+## 25. Test/Utility
+
+`test-db.js`
+
+- ใช้ `.env`
+- ต่อ Supabase ด้วย anon key
+- อ่าน `purchase_orders`
+- สรุปจำนวน PO ที่มี `pdf_url` เป็น Google Drive, Supabase Storage หรือว่าง
+- ใช้ตรวจสถานะ migration PDF URL
+
+## 26. ภาพรวมสถานะโปรเจกต์ล่าสุด
+
+ตอนนี้โปรเจกต์มี 2 แนวทางอยู่พร้อมกัน:
+
+1. Google Apps Script เดิม  
+   ใช้ `Code.gs`, `Line.gs`, `PDF.gs`, Google Sheets, Google Drive และ Web App ของ Apps Script
+
+2. Netlify + Supabase ใหม่  
+   ใช้ `build.js` compile หน้าเดิมเป็น static site, ใช้ `supabase-bridge.js` แทน `google.script.run`, ใช้ Netlify Functions สำหรับ LINE/PDF/Admin และใช้ Supabase เป็น database/storage
+
+แนวทาง migration ที่เห็นจากไฟล์คือพยายามรักษา frontend เดิมไว้ แล้วค่อย ๆ map function เดิมไปยัง Supabase เพื่อให้เปลี่ยน backend โดยไม่ต้อง rewrite UI ทั้งหมด
+
+## 27. จุดที่ควรตรวจเพิ่มสำหรับฝั่ง Supabase/Netlify
+
+1. ไฟล์ `supabase_schema.sql` มี comment ว่า profiles trigger จะสร้าง profile จาก Supabase Auth แต่ใน schema ที่อ่านช่วงต้นยังไม่เห็น trigger/function นั้นชัดเจน ควรตรวจว่ามี script เพิ่มในช่วงท้ายหรือยัง
+
+2. `public/supabase-bridge.js` น่าจะยัง map function ไม่ครบเท่า `Code.gs` ทั้งหมด ต้องไล่เทียบกับทุก function ที่ `Js.html` เรียก
+
+3. หลายไฟล์มีข้อความภาษาไทยที่แสดงเป็น mojibake ใน terminal ถ้า deploy แล้วภาษาเพี้ยน ควรตรวจ encoding ให้เป็น UTF-8 ทุกไฟล์
+
+4. `functions/line-send-repair.js` เก็บ sent timestamp ของ repair ใน table `settings` แทนคอลัมน์ใน `repairs` ขณะที่ PO เก็บใน `purchase_orders.line_sent_at` ควรกำหนดแนวทางเดียวกัน
+
+5. `line-webhook.js` ยังเป็นเวอร์ชันย่อเมื่อเทียบกับ `Line.gs` เดิม บาง helper/Flex/stock sync อาจยังไม่ครบ
+
+6. `generate-pdf.js` ใช้การ fetch font จาก internet ตอน runtime ถ้า network ช้าหรือ Google Fonts มีปัญหา การสร้าง PDF อาจ fail หรือช้า ควรพิจารณา bundle font หรือ cache
+
+7. `package.json` มีทั้ง `pdf-lib` และ `pdfkit` แต่ function ใช้ `pdfkit` เป็นหลัก อาจมี dependency ที่ไม่ได้ใช้
+
+8. `test-db.js` เป็นไฟล์ใหม่ที่ยัง untracked ใน git ตอนตรวจล่าสุด ถ้าต้องการเก็บไว้ควร add/commit ถ้าเป็นไฟล์ทดลองควรพิจารณา `.gitignore`
