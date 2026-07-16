@@ -142,7 +142,9 @@ async function handlePostback(event) {
         // Call serverless PDF generator endpoint
         let pdfUrl = '';
         try {
-          const pdfRes = await fetch(`${process.env.URL}/.netlify/functions/generate-pdf?poNo=${id}`);
+          const siteUrl = (process.env.SITE_URL || process.env.DEPLOY_PRIME_URL || process.env.URL || '').replace(/\/$/, '');
+          if (!siteUrl) throw new Error('Missing SITE_URL environment variable');
+          const pdfRes = await fetch(`${siteUrl}/.netlify/functions/generate-pdf?poNo=${encodeURIComponent(id)}`);
           if (pdfRes.ok) {
             const pdfJson = await pdfRes.json();
             pdfUrl = pdfJson.pdfUrl || '';
