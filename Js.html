@@ -1405,6 +1405,7 @@ function renderPOTable(pos) {
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
+          ${p.printedAt ? `<button class="btn btn-sm btn-outline-warning" onclick="unmarkPOAsPrinted('${p.poNo}')" title="ยกเลิกสถานะพิมพ์แล้ว"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งขออนุมัติเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
@@ -2276,6 +2277,83 @@ function generatePOPdfForPrint(poNo) {
   });
 }
 
+function markPOsAsPrinted(poNos) {
+  const uniqueNos = [...new Set((poNos || []).filter(Boolean))];
+  if (!uniqueNos.length) return Promise.resolve([]);
+  return Promise.all(uniqueNos.map(poNo => new Promise(resolve => {
+    google.script.run
+      .withSuccessHandler(res => resolve({ poNo, success: true, res }))
+      .withFailureHandler(err => resolve({ poNo, success: false, message: err?.message || String(err) }))
+      .markPOAsPrinted(poNo);
+  })));
+}
+
+function unmarkPOAsPrinted(poNo) {
+  if (!poNo) return;
+  Swal.fire({
+    icon: 'question',
+    title: 'ยกเลิกสถานะพิมพ์แล้ว?',
+    text: `ต้องการเปลี่ยน ${poNo} กลับเป็น "ยังไม่ได้พิมพ์" หรือไม่`,
+    showCancelButton: true,
+    confirmButtonText: 'ยกเลิกสถานะ',
+    cancelButtonText: 'ปิด',
+    confirmButtonColor: '#EF4444'
+  }).then(result => {
+    if (!result.isConfirmed) return;
+    google.script.run
+      .withSuccessHandler(() => {
+        const po = allPOs.find(p => p.poNo === poNo);
+        if (po) po.printedAt = '';
+        loadPOs();
+        showToast('success', `ยกเลิกสถานะพิมพ์แล้วของ ${poNo} เรียบร้อย`);
+      })
+      .withFailureHandler(err => showToast('error', err?.message || String(err)))
+      .unmarkPOAsPrinted(poNo);
+  });
+}
+
+async function confirmPOPrinted(poNos, options = {}) {
+  const uniqueNos = [...new Set((poNos || []).filter(Boolean))];
+  if (!uniqueNos.length) return false;
+  const title = uniqueNos.length === 1
+    ? `พิมพ์ ${uniqueNos[0]} เรียบร้อยแล้วหรือไม่?`
+    : `พิมพ์ PO ${uniqueNos.length} ใบเรียบร้อยแล้วหรือไม่?`;
+
+  const result = await Swal.fire({
+    icon: 'question',
+    title,
+    text: 'ระบบจะบันทึกสถานะ "พิมพ์แล้ว" เฉพาะเมื่อคุณยืนยันเท่านั้น',
+    showCancelButton: true,
+    confirmButtonText: 'พิมพ์แล้ว',
+    cancelButtonText: 'ยังไม่พิมพ์',
+    confirmButtonColor: '#10B981'
+  });
+  if (!result.isConfirmed) {
+    showToast('info', 'ยังไม่บันทึกสถานะพิมพ์แล้ว');
+    return false;
+  }
+
+  const results = await markPOsAsPrinted(uniqueNos);
+  const failed = results.filter(r => !r.success);
+  if (failed.length) {
+    showToast('error', `บันทึกสถานะพิมพ์แล้วไม่สำเร็จ ${failed.length} รายการ`);
+    return false;
+  }
+
+  uniqueNos.forEach(poNo => {
+    const po = allPOs.find(p => p.poNo === poNo);
+    if (po) po.printedAt = new Date().toISOString();
+  });
+  loadPOs();
+  if (options.closeModal) {
+    const modalEl = document.getElementById('printModal');
+    const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+    if (modal) modal.hide();
+  }
+  showToast('success', 'บันทึกสถานะพิมพ์แล้วเรียบร้อย');
+  return true;
+}
+
 async function openApprovedPOPdf(po, options = {}) {
   if (!po) return false;
 
@@ -2306,17 +2384,7 @@ async function openApprovedPOPdf(po, options = {}) {
   }
 
   win.location.href = addPdfCacheBuster(getDirectPdfUrl(directUrl));
-  google.script.run
-    .withSuccessHandler(() => {
-      loadPOs();
-      if (options.closeModal) {
-        const modalEl = document.getElementById('printModal');
-        const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
-        if (modal) modal.hide();
-      }
-      showToast('success', 'เปิดไฟล์ PDF สำหรับพิมพ์แล้ว');
-    })
-    .markPOAsPrinted(po.poNo);
+  await confirmPOPrinted([po.poNo], options);
   return true;
 }
 
@@ -2726,18 +2794,6 @@ function printPO() {
       </body></html>`);
       win.document.close();
 
-      if (printedNos.length) {
-        let done = 0;
-        printedNos.forEach(poNo => {
-          google.script.run
-            .withSuccessHandler(() => {
-              done++;
-              if (done === printedNos.length) loadPOs();
-            })
-            .markPOAsPrinted(poNo);
-        });
-      }
-
       // ปิด loading หลังเปิดหน้าต่างสำเร็จ
       Swal.fire({
         icon: 'success',
@@ -2746,7 +2802,7 @@ function printPO() {
         timer: 1800,
         timerProgressBar: true,
         showConfirmButton: false
-      });
+      }).then(() => confirmPOPrinted(printedNos));
 
     } catch(e) {
       Swal.fire({

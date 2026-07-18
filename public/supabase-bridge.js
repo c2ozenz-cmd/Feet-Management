@@ -1217,6 +1217,14 @@
       } catch (err) { this._err(err); }
     }
 
+    async unmarkPOAsPrinted(poNo) {
+      try {
+        const { error } = await supabase.from('purchase_orders').update({ printed_at: '' }).eq('po_no', poNo);
+        if (error) throw error;
+        this._ok({ success: true });
+      } catch (err) { this._err(err); }
+    }
+
     // ── SUMMARIES / REPORTING ──
     async getWeeklySummary(weekOffset) {
       try {
