@@ -57,7 +57,7 @@
 
   <div class="search-bar">
     <input type="text" id="stockSearch" class="form-control" placeholder="ค้นหาอะไหล่..." oninput="filterStock()">
-    <select id="stockStatusFilter" class="form-select" style="max-width:180px" onchange="filterStock()">
+    <select id="stockStatusFilter" class="form-select" style="max-width:180px" onchange="filterStock()" data-no-tomselect>
       <option value="">ทุกสถานะ</option>
       <option value="ok">มีพอ</option>
       <option value="low">ใกล้หมด</option>

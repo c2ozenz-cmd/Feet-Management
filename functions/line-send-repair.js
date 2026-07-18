@@ -16,7 +16,7 @@ exports.handler = async (event, context) => {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
-  const repairNo = event.queryStringParameters.repairNo;
+  const repairNo = event.queryStringParameters?.repairNo;
   if (!repairNo) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing repairNo parameter' }) };
   }
@@ -123,39 +123,98 @@ async function logLine(stage, detail) {
   }
 }
 
-function buildRepairFlexMessage(repair) {
-  const statusColor = {
-    'รอดำเนินการ': '#E8A838',
-    'กำลังซ่อม'  : '#3B82F6',
-    'รออะไหล่'   : '#8B5CF6',
-    'เสร็จแล้ว'  : '#10B981'
+function formatNumber(value) {
+  return (parseFloat(value) || 0).toLocaleString('th-TH');
+}
+
+function formatDateOnlyTH(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('th-TH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+}
+
+function detailRow(icon, label, value) {
+  const safeLabel = label || ' ';
+  return {
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      { type: 'text', text: icon, size: 'xs', flex: 0 },
+      { type: 'text', text: safeLabel, size: 'xs', color: '#6B7280', flex: 3 },
+      { type: 'text', text: String(value || '-'), size: 'xs', color: '#111827', align: 'end', wrap: true, flex: 5, weight: 'bold' }
+    ]
   };
-  const headerColor = statusColor[repair.status] || '#D97757';
+}
+
+function buildRepairFlexMessage(repair) {
+  const plate = repair.plate || '-';
 
   return {
     type: 'flex',
-    altText: `🔧 แจ้งซ่อมใหม่ | ${repair.repair_no} | ทะเบียน ${repair.plate}`,
+    altText: `แจ้งซ่อมใหม่ ${repair.repair_no} | ${plate}`,
     contents: {
-      type: 'bubble', size: 'kilo',
+      type: 'bubble',
+      size: 'kilo',
       header: {
-        type: 'box', layout: 'vertical', paddingAll: '16px',
-        backgroundColor: headerColor,
+        type: 'box',
+        layout: 'horizontal',
+        paddingAll: '16px',
+        spacing: 'sm',
+        backgroundColor: '#F0B032',
         contents: [
-          { type: 'text', text: '🔧 ขออนุมัติแจ้งซ่อมใหม่', weight: 'bold', size: 'lg', color: '#ffffff' },
-          { type: 'text', text: `เลขที่: ${repair.repair_no}`, size: 'xs', color: '#f3f4f6', margin: 'xs' }
+          { type: 'text', text: '🔧', size: 'xxl', flex: 0 },
+          {
+            type: 'box',
+            layout: 'vertical',
+            margin: 'sm',
+            contents: [
+              { type: 'text', text: 'แจ้งซ่อมใหม่', weight: 'bold', size: 'lg', color: '#FFFFFF' },
+              { type: 'text', text: repair.repair_no, size: 'sm', color: '#FFF8E8', margin: 'xs' }
+            ]
+          }
         ]
       },
       body: {
         type: 'box',
         layout: 'vertical',
+        paddingAll: '16px',
+        spacing: 'md',
         contents: [
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#F0F4FF',
+            cornerRadius: '8px',
+            paddingAll: '12px',
+            contents: [
+              { type: 'text', text: '🚌 ทะเบียนรถ', size: 'xxs', color: '#6B7280' },
+              { type: 'text', text: plate, size: 'xl', color: '#1F416A', weight: 'bold', margin: 'xs' }
+            ]
+          },
           {
             type: 'box',
             layout: 'vertical',
             spacing: 'sm',
             contents: [
-              { type: 'text', text: `ทะเบียนรถ: ${repair.plate}`, size: 'sm', weight: 'bold' },
-              { type: 'text', text: `รายการแจ้งซ่อม:\n${repair.repair_list || '-'}`, size: 'sm', wrap: true }
+              detailRow('🗓️', 'วันที่แจ้ง', formatDateOnlyTH(repair.date || repair.created_at)),
+              detailRow('⛽', 'เลขไมล์', repair.mileage ? `${formatNumber(repair.mileage)} กม.` : '-'),
+              detailRow('👤', 'ผู้แจ้ง', repair.created_by || '-')
+            ]
+          },
+          { type: 'separator' },
+          {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'xs',
+            contents: [
+              { type: 'text', text: '📋 รายการซ่อม', size: 'sm', color: '#6B7280', weight: 'bold' },
+              { type: 'text', text: repair.repair_list || '-', size: 'sm', color: '#111827', wrap: true }
             ]
           }
         ]
@@ -168,13 +227,16 @@ function buildRepairFlexMessage(repair) {
           {
             type: 'button',
             style: 'primary',
-            color: '#1a3a5c',
-            action: { type: 'postback', label: 'อนุมัติซ่อม', data: `action=approve&type=repair&id=${repair.repair_no}` }
+            color: '#10B981',
+            height: 'sm',
+            action: { type: 'postback', label: '✅ อนุมัติ', data: `action=approve&type=repair&id=${repair.repair_no}`, displayText: `✅ อนุมัติการซ่อม ${repair.repair_no}` }
           },
           {
             type: 'button',
-            style: 'secondary',
-            action: { type: 'postback', label: 'ปฏิเสธ', data: `action=reject&type=repair&id=${repair.repair_no}` }
+            style: 'primary',
+            color: '#EF4444',
+            height: 'sm',
+            action: { type: 'postback', label: '❌ ปฏิเสธ', data: `action=reject&type=repair&id=${repair.repair_no}`, displayText: `❌ ปฏิเสธการซ่อม ${repair.repair_no}` }
           }
         ]
       }

@@ -60,12 +60,12 @@
 <!-- Search and Filters -->
 <div class="search-bar">
   <input type="text" id="lineLogSearch" class="form-control" placeholder="ค้นหาข้อความ / ผู้รับ..." oninput="filterLineLogs()">
-  <select id="lineLogCostFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()">
+  <select id="lineLogCostFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()" data-no-tomselect>
     <option value="">ทุกสถานะค่าบริการ</option>
     <option value="ฟรี">เฉพาะฟรี (Reply)</option>
     <option value="คิดเงิน">เฉพาะคิดเงิน (Push)</option>
   </select>
-  <select id="lineLogMethodFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()">
+  <select id="lineLogMethodFilter" class="form-select" style="max-width:200px" onchange="filterLineLogs()" data-no-tomselect>
     <option value="">ทุกคำสั่ง API</option>
     <option value="Push">Push (บอททักก่อน)</option>
     <option value="Reply">Reply (ตอบกลับแชท)</option>

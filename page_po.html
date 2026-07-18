@@ -13,13 +13,13 @@
   <div class="search-bar">
     <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า / รหัสกลุ่ม GRP..." oninput="filterPOs()">
     <input type="month" id="poMonthFilter" class="form-control" style="max-width:180px" onchange="filterPOs()">
-    <select id="poStatusFilter" class="form-select" style="max-width:180px" onchange="filterPOs()">
+    <select id="poStatusFilter" class="form-select" style="max-width:180px" onchange="filterPOs()" data-no-tomselect>
       <option value="">ทุกสถานะ</option>
       <option value="รออนุมัติ">รออนุมัติ</option>
       <option value="อนุมัติแล้ว">อนุมัติแล้ว</option>
       <option value="รับของแล้ว">รับของแล้ว</option>
     </select>
-    <select id="poSortMode" class="form-select" style="max-width:220px" onchange="filterPOs()">
+    <select id="poSortMode" class="form-select" style="max-width:220px" onchange="filterPOs()" data-no-tomselect>
       <option value="poNoDesc" selected>เลข PO ล่าสุด</option>
       <option value="poNoAsc">เลข PO เก่าสุด</option>
       <option value="issueDateDesc">วันที่ออกล่าสุด</option>
@@ -203,7 +203,7 @@
       <div class="card-icon"><i class="bi bi-list-ul"></i></div>
       รายการสั่งอะไหล่
       <div class="ms-auto d-flex gap-2 align-items-center">
-        <select id="poVatType" class="form-select form-select-sm" style="width:150px" onchange="calcPOTotal()">
+                <select id="poVatType" class="form-select form-select-sm" style="width:150px" onchange="calcPOTotal()" data-no-tomselect>
           <option value="none">ไม่มี VAT</option>
           <option value="exclusive">VAT นอก (7%)</option>
           <option value="inclusive">VAT ใน (7%)</option>

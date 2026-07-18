@@ -61,6 +61,7 @@ function initTomSelects(root = document) {
   if (typeof TomSelect === 'undefined') return;
   const scope = root && root.querySelectorAll ? root : document;
   scope.querySelectorAll('select:not([data-no-tomselect])').forEach(select => {
+    if (select.closest('.search-bar')) return;
     if (select.tomselect) return;
     const instance = new TomSelect(select, {
       create: false,
@@ -2234,6 +2235,7 @@ function getPOPdfStorageCandidates(poNo) {
   if (!base || !poNo) return [];
   return [
     `${base}/storage/v1/object/public/pdf-orders/${encodeURIComponent(`PO_${poNo}.pdf`)}`,
+    `${base}/storage/v1/object/public/pdf-orders/${encodeURIComponent(`po-${poNo}.pdf`)}`,
     `${base}/storage/v1/object/public/pdf-orders/${encodeURIComponent(`PO_${poNo}`)}`
   ];
 }
@@ -2264,6 +2266,16 @@ async function resolveApprovedPOPdfUrl(po) {
   return '';
 }
 
+function generatePOPdfForPrint(poNo) {
+  return new Promise(resolve => {
+    if (!poNo) return resolve(null);
+    google.script.run
+      .withSuccessHandler(res => resolve(res || null))
+      .withFailureHandler(() => resolve(null))
+      .generateAndSavePOPdf(poNo);
+  });
+}
+
 async function openApprovedPOPdf(po, options = {}) {
   if (!po) return false;
 
@@ -2280,6 +2292,11 @@ async function openApprovedPOPdf(po, options = {}) {
 
   win.document.write(`<!DOCTYPE html><html><head><title>${po.poNo}</title></head><body style="font-family:sans-serif;padding:24px">Opening approved PDF for ${po.poNo}...</body></html>`);
   win.document.close();
+
+  const generated = await generatePOPdfForPrint(po.poNo);
+  if (generated?.success && generated.pdfUrl) {
+    po.pdfUrl = generated.pdfUrl;
+  }
 
   const directUrl = await resolveApprovedPOPdfUrl(po);
   if (!directUrl) {
@@ -5124,12 +5141,20 @@ function loadLineQuotaStatus() {
         return;
       }
 
-      const usedText = Number(res.used || 0).toLocaleString('th-TH');
+      const usedText = res.used === null || typeof res.used === 'undefined'
+        ? '—'
+        : Number(res.used || 0).toLocaleString('th-TH');
       if (res.type === 'limited') {
         const limit = Number(res.limit || 0);
+        if (res.used === null || typeof res.used === 'undefined') {
+          setQuotaDisplay(usedText, `Limit ${limit.toLocaleString('th-TH')} | รอข้อมูลยอดใช้จาก LINE`);
+          return;
+        }
         const remaining = Number(res.remaining || 0);
         const pct = limit > 0 ? Math.min(100, Math.round((Number(res.used || 0) / limit) * 100)) : 0;
         setQuotaDisplay(usedText, `ใช้ ${pct}% | เหลือ ${remaining.toLocaleString('th-TH')} / ${limit.toLocaleString('th-TH')}`);
+      } else if (res.type === 'unknown') {
+        setQuotaDisplay(usedText, 'เช็กยอดใช้ได้ แต่ LINE ยังไม่ตอบ limit');
       } else {
         setQuotaDisplay(usedText, 'บัญชีนี้ไม่จำกัดโควต้า');
       }

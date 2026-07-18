@@ -59,6 +59,10 @@
       return `${prefix}${Date.now()}${Math.floor(Math.random() * 1000)}`;
     }
 
+    _responseErrorMessage(json, fallback) {
+      return json?.error || json?.message || fallback;
+    }
+
     async _generatePartCodeValue() {
       const prefix = 'P';
       const { data, error } = await supabase
@@ -177,12 +181,10 @@
     async _deductStockForRepair(repairNo) {
       const { data: priorLogs, error: priorErr } = await supabase
         .from('stock_logs')
-        .select('id')
+        .select('part_name, qty')
         .eq('type', 'OUT')
-        .eq('ref', `Repair: ${repairNo}`)
-        .limit(1);
+        .eq('ref', `Repair: ${repairNo}`);
       if (priorErr) throw priorErr;
-      if ((priorLogs || []).length) return;
 
       const { data: parts, error: partsErr } = await supabase
         .from('repair_parts')
@@ -190,9 +192,18 @@
         .eq('repair_no', repairNo);
       if (partsErr) throw partsErr;
 
+      const deductedByPart = new Map();
+      (priorLogs || []).forEach(log => {
+        const partName = String(log.part_name || '').trim();
+        if (!partName) return;
+        deductedByPart.set(partName, (deductedByPart.get(partName) || 0) + (parseFloat(log.qty) || 0));
+      });
+
       for (const part of (parts || [])) {
         const partName = part.part_name;
-        const deductQty = parseFloat(part.qty) || 0;
+        const requiredQty = parseFloat(part.qty) || 0;
+        const alreadyDeducted = deductedByPart.get(String(partName || '').trim()) || 0;
+        const deductQty = Math.max(0, requiredQty - alreadyDeducted);
         if (!partName || deductQty <= 0) continue;
         const { data: stockRows, error: stockErr } = await supabase
           .from('stock')
@@ -1121,8 +1132,8 @@
     async sendPOToLineDirect(poNo) {
       try {
         const res = await fetch(`/.netlify/functions/line-send-po?poNo=${poNo}`, { method: 'POST' });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to send PO to LINE');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(this._responseErrorMessage(json, 'Failed to send PO to LINE'));
         this._ok(json);
       } catch (err) { this._err(err); }
     }
@@ -1138,8 +1149,8 @@
     async sendRepairToLineDirect(repairNo) {
       try {
         const res = await fetch(`/.netlify/functions/line-send-repair?repairNo=${repairNo}`, { method: 'POST' });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to send Repair request to LINE');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(this._responseErrorMessage(json, 'Failed to send Repair request to LINE'));
         this._ok(json);
       } catch (err) { this._err(err); }
     }
@@ -1169,14 +1180,31 @@
     }
 
     async getLineQuotaStatus() {
-      this._ok({ success: true, remaining: null, limit: null, message: 'ไม่สามารถตรวจ quota จาก LINE API ฝั่ง client ได้' });
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch('/.netlify/functions/line-quota', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.message || json.error || 'Failed to fetch LINE quota');
+        this._ok(json);
+      } catch (err) {
+        const isAbort = err?.name === 'AbortError';
+        this._ok({
+          success: false,
+          temporary: isAbort,
+          message: isAbort
+            ? 'เช็กโควต้า LINE ไม่สำเร็จชั่วคราว: ใช้เวลานานเกินไป'
+            : err.message
+        });
+      }
     }
 
     async generateAndSavePOPdf(poNo) {
       try {
         const res = await fetch(`/.netlify/functions/generate-pdf?poNo=${poNo}`);
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Failed to generate PDF');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(this._responseErrorMessage(json, 'Failed to generate PDF'));
         this._ok({ success: true, pdfUrl: json.pdfUrl });
       } catch (err) { this._ok({ success: false, message: err.message }); }
     }

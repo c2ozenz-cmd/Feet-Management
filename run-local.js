@@ -75,7 +75,7 @@ function readBody(req) {
   });
 }
 
-async function handleNetlifyFunction(req, res, pathname) {
+async function handleNetlifyFunction(req, res, pathname, queryStringParameters) {
   const name = pathname.replace('/.netlify/functions/', '').split('/')[0];
   const functionPath = path.join(rootDir, 'functions', `${name}.js`);
 
@@ -92,6 +92,7 @@ async function handleNetlifyFunction(req, res, pathname) {
     const result = await mod.handler({
       httpMethod: req.method,
       path: pathname,
+      queryStringParameters,
       headers: req.headers,
       body
     });
@@ -111,9 +112,10 @@ function handleRequest(req, res) {
     return;
   }
 
-  const pathname = decodeURIComponent(req.url.split('?')[0]);
+  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const pathname = decodeURIComponent(requestUrl.pathname);
   if (pathname.startsWith('/.netlify/functions/')) {
-    handleNetlifyFunction(req, res, pathname);
+    handleNetlifyFunction(req, res, pathname, Object.fromEntries(requestUrl.searchParams));
     return;
   }
 

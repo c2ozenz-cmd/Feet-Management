@@ -14,7 +14,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const id = event.queryStringParameters.id;
+    const id = event.queryStringParameters?.id;
     if (!id) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Missing user id' }) };
     }

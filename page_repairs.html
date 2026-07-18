@@ -13,7 +13,7 @@
   <div class="search-bar">
     <input type="text" id="repairSearch" class="form-control" placeholder="ค้นหาเลขที่ / ทะเบียน..." oninput="filterRepairs()">
     <input type="month" id="repairMonthFilter" class="form-control" style="max-width:180px" onchange="filterRepairs()">
-    <select id="repairStatusFilter" class="form-select" style="max-width:180px" onchange="filterRepairs()">
+    <select id="repairStatusFilter" class="form-select" style="max-width:180px" onchange="filterRepairs()" data-no-tomselect>
       <option value="">ทุกสถานะ</option>
       <option value="รอดำเนินการ">รอดำเนินการ</option>
       <option value="กำลังซ่อม">กำลังซ่อม</option>
