@@ -122,8 +122,9 @@
 
   <script>
     const params = new URLSearchParams(location.search);
-    const poNo = (params.get('poNo') || '').toUpperCase();
-    const mode = params.get('mode') || 'share';
+    const stateParams = parseLiffStateParams(params);
+    const poNo = (getLaunchParam('poNo') || '').toUpperCase();
+    const mode = getLaunchParam('mode') || 'share';
     const statusText = document.getElementById('statusText');
     const poNoText = document.getElementById('poNoText');
     const shareBtn = document.getElementById('shareBtn');
@@ -135,6 +136,43 @@
     let shareData = null;
 
     poNoText.textContent = poNo || 'PO';
+
+    if (poNo) {
+      sessionStorage.setItem('lineSharePoNo', poNo);
+      sessionStorage.setItem('lineShareMode', mode);
+    }
+
+    function parseLiffStateParams(searchParams) {
+      const rawState = searchParams.get('liff.state');
+      if (!rawState) return new URLSearchParams();
+
+      let state = rawState;
+      try {
+        state = decodeURIComponent(rawState);
+      } catch (err) {
+        state = rawState;
+      }
+
+      const queryIndex = state.indexOf('?');
+      if (queryIndex >= 0) return new URLSearchParams(state.slice(queryIndex + 1));
+      if (state.startsWith('?')) return new URLSearchParams(state.slice(1));
+      return new URLSearchParams(state);
+    }
+
+    function getLaunchParam(name) {
+      return params.get(name)
+        || stateParams.get(name)
+        || sessionStorage.getItem(name === 'poNo' ? 'lineSharePoNo' : 'lineShareMode')
+        || '';
+    }
+
+    function buildLoginRedirectUri() {
+      const url = new URL(location.href);
+      url.search = '';
+      if (mode) url.searchParams.set('mode', mode);
+      if (poNo) url.searchParams.set('poNo', poNo);
+      return url.toString();
+    }
 
     function setStatus(text) {
       statusText.textContent = text;
@@ -163,7 +201,11 @@
       if (!liffId) return false;
       await liff.init({ liffId });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: location.href });
+        if (poNo) {
+          sessionStorage.setItem('lineSharePoNo', poNo);
+          sessionStorage.setItem('lineShareMode', mode);
+        }
+        liff.login({ redirectUri: buildLoginRedirectUri() });
         return false;
       }
       return true;
