@@ -165,7 +165,14 @@ async function handlePostback(event) {
 
         // Generate manager-signed PDF before replying to LINE.
         const pdfRes = await generatePOPdf(id);
-        const pdfUrl = pdfRes.pdfUrl || '';
+        const { data: freshPo } = await supabase.from('purchase_orders').select('pdf_url').eq('po_no', id).single();
+        const pdfUrl = pdfRes.pdfUrl || freshPo?.pdf_url || po?.pdf_url || '';
+        await logLineWorkflow('po_approval_pdf_result', {
+          id,
+          success: pdfRes.success,
+          pdfUrl,
+          message: pdfRes.message || ''
+        });
 
         const flexMsg = buildPOApprovalFlex(id, approverName, dateStr, plate, pdfUrl);
         const replyRes = await replyLineFlex(replyToken, flexMsg);
@@ -349,8 +356,16 @@ async function handlePOTextDecision(replyToken, lineUserId, poNo, action) {
 
   await saveApprovalInfo('po', poNo, lineUserId, approverName);
   const pdfRes = await generatePOPdf(poNo);
+  const { data: freshPo } = await supabase.from('purchase_orders').select('pdf_url').eq('po_no', poNo).single();
   const dateStr = formatDateTH(new Date());
-  const flexMsg = buildPOApprovalFlex(poNo, approverName, dateStr, po.plate || '', pdfRes.pdfUrl || po.pdf_url || '');
+  const pdfUrl = pdfRes.pdfUrl || freshPo?.pdf_url || po.pdf_url || '';
+  await logLineWorkflow('po_text_approval_pdf_result', {
+    id: poNo,
+    success: pdfRes.success,
+    pdfUrl,
+    message: pdfRes.message || ''
+  });
+  const flexMsg = buildPOApprovalFlex(poNo, approverName, dateStr, po.plate || '', pdfUrl);
   await replyLineFlex(replyToken, flexMsg);
 }
 
@@ -469,11 +484,11 @@ async function generatePOPdf(poNo) {
       pdfUrl: json.pdfUrl || '',
       error: json.error || json.message || ''
     });
-    return { success, pdfUrl: json.pdfUrl || '' };
+    return { success, pdfUrl: json.pdfUrl || '', message: json.error || json.message || '' };
   } catch (err) {
     console.error('PDF Generation failed:', err);
     await logLineWorkflow('po_pdf_error', { id: poNo, message: err.message, stack: err.stack });
-    return { success: false, pdfUrl: '' };
+    return { success: false, pdfUrl: '', message: err.message };
   }
 }
 
