@@ -174,9 +174,14 @@
       return url.toString();
     }
 
+    function isLineInAppBrowser() {
+      return /Line\//i.test(navigator.userAgent || '');
+    }
+
     function shouldUseLiffUrl() {
       return mode === 'share'
         && shareData?.liffBaseUrl
+        && !isLineInAppBrowser()
         && !params.has('liff.state')
         && !params.has('liff.referrer')
         && !sessionStorage.getItem(`openedViaLiff:${poNo}`);
