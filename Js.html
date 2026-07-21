@@ -3667,6 +3667,15 @@ const COMPANY_KEYS = [
   'COMPANY_STAMP'   // ✅ ตราประทับ
 ];
 
+const SYSTEM_SETTING_PREFIXES = [
+  'linesent_repair:',
+  'pending_report:'
+];
+
+function isSystemSettingKey(key) {
+  return SYSTEM_SETTING_PREFIXES.some(prefix => String(key || '').startsWith(prefix));
+}
+
 function loadSettings() {
   google.script.run.withSuccessHandler(settings => {
     const obj = {};
@@ -3791,7 +3800,7 @@ function saveCompanySettings() {
 
 // Other Settings (ไม่รวม company keys)
 function renderOtherSettings(settings) {
-  const others = settings.filter(s => !COMPANY_KEYS.includes(s.key));
+  const others = settings.filter(s => !COMPANY_KEYS.includes(s.key) && !isSystemSettingKey(s.key));
   renderSettingsTable(others);
 }
 
@@ -3826,9 +3835,11 @@ function saveSettings() {
     if (inputs[0]?.value) extra.push({ key: inputs[0].value, value: inputs[1]?.value || '' });
   });
   google.script.run.withSuccessHandler(allSettings => {
-    // รักษา company keys ที่มีอยู่ + เพิ่ม extra
+    // รักษา company keys และ system-generated keys ที่ไม่ได้แสดงในตาราง + เพิ่ม extra
     const existing = {};
-    (allSettings || []).forEach(s => { if (COMPANY_KEYS.includes(s.key)) existing[s.key] = s.value; });
+    (allSettings || []).forEach(s => {
+      if (COMPANY_KEYS.includes(s.key) || isSystemSettingKey(s.key)) existing[s.key] = s.value;
+    });
     const merged = [...Object.entries(existing).map(([key,value])=>({key,value})), ...extra];
     showLoading('กำลังบันทึก...');
     google.script.run
