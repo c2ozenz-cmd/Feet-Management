@@ -6,6 +6,7 @@
 // ── GLOBAL STATE ──
 let currentUser = null;
 let appSessionToken = '';
+let currentPageName = '';
 let allRepairs = [];
 let allPOs = [];
 let currentPOList = [];
@@ -14,6 +15,9 @@ let poSortMode = 'poNoDesc';
 let poPageSize = 15;
 let poCurrentPage = 1;
 let filteredPOsList = [];
+let poAutoRefreshTimer = null;
+let poRefreshInFlight = false;
+let lastPOAutoRefreshAt = 0;
 let currentPrintPONos = [];
 let allStock = [];
 let allBuses = [];
@@ -290,6 +294,14 @@ function initApp() {
   setTimeout(() => initTomSelects(), 0);
 }
 
+window.addEventListener('focus', () => {
+  maybeRefreshPOsOnReturn();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) maybeRefreshPOsOnReturn();
+});
+
 function hydrateCurrentUserSignature() {
   if (!currentUser || currentUser.signatureUrl) return;
   google.script.run
@@ -306,8 +318,10 @@ function hydrateCurrentUserSignature() {
 
 function logout() {
   confirmAction('คุณต้องการออกจากระบบ?', () => {
+    stopPOAutoRefresh();
     currentUser = null;
     appSessionToken = '';
+    currentPageName = '';
     window.currentUser = null;
     window.appSessionToken = '';
     sessionStorage.removeItem('currentUser');
@@ -321,6 +335,7 @@ function logout() {
 
 // ── NAVIGATION ──
 function navigateTo(page) {
+  currentPageName = page;
   if (typeof toggleQuickActions === 'function') toggleQuickActions(true);
   document.querySelectorAll('[id^=page-]').forEach(el => el.classList.add('d-none'));
   document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
@@ -348,6 +363,8 @@ function navigateTo(page) {
     case 'oiltemplate': loadOilTemplate(); break;
     case 'linelog': loadLineLog(); break;
   }
+  if (page === 'po') startPOAutoRefresh();
+  else stopPOAutoRefresh();
   setTimeout(() => initTomSelects(pageEl || document), 0);
 }
 
@@ -1258,15 +1275,60 @@ function onPlateChange() {
 }
 
 // ── PURCHASE ORDERS ──
-function loadPOs() {
-  showPOList();
-  // Load shops for dropdown
-  google.script.run.withSuccessHandler(shops => {
-    allShops = shops || [];
-    initComboTomSelects();
-  }).getShops();
+function isPOListVisible() {
+  const listView = document.getElementById('poListView');
+  return currentPageName === 'po' && listView && !listView.classList.contains('d-none');
+}
+
+function startPOAutoRefresh() {
+  stopPOAutoRefresh();
+  poAutoRefreshTimer = setInterval(() => {
+    refreshPOsSilently();
+  }, 15000);
+}
+
+function stopPOAutoRefresh() {
+  if (poAutoRefreshTimer) {
+    clearInterval(poAutoRefreshTimer);
+    poAutoRefreshTimer = null;
+  }
+}
+
+function maybeRefreshPOsOnReturn() {
+  if (!isPOListVisible()) return;
+  if (Date.now() - lastPOAutoRefreshAt < 3000) return;
+  refreshPOsSilently();
+}
+
+function refreshPOsSilently() {
+  if (document.hidden || !isPOListVisible() || poRefreshInFlight) return;
+  poRefreshInFlight = true;
+  google.script.run
+    .withSuccessHandler(pos => {
+      poRefreshInFlight = false;
+      lastPOAutoRefreshAt = Date.now();
+      allPOs = pos || [];
+      filterPOs();
+    })
+    .withFailureHandler(() => {
+      poRefreshInFlight = false;
+    })
+    .getPOs();
+}
+
+function loadPOs(options = {}) {
+  const silent = options.silent === true;
+  if (!silent) {
+    showPOList();
+    // Load shops for dropdown
+    google.script.run.withSuccessHandler(shops => {
+      allShops = shops || [];
+      initComboTomSelects();
+    }).getShops();
+  }
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
+    lastPOAutoRefreshAt = Date.now();
     
     // ตั้งค่าตัวเลือกเดือนเริ่มต้นเป็นเดือนล่าสุดที่มีข้อมูล PO เพื่อการแสดงผลที่ตอบโจทย์
     if (allPOs.length > 0) {
@@ -1287,7 +1349,7 @@ function loadPOs() {
     
     filterPOs();
   }).getPOs();
-  loadBusPlates();
+  if (!silent) loadBusPlates();
 }
 
 function updateSelectStatusClass(sel) {
