@@ -174,6 +174,21 @@
       return url.toString();
     }
 
+    function shouldUseLiffUrl() {
+      return mode === 'share'
+        && shareData?.liffBaseUrl
+        && !params.has('liff.state')
+        && !params.has('liff.referrer')
+        && !sessionStorage.getItem(`openedViaLiff:${poNo}`);
+    }
+
+    function openViaLiffUrl() {
+      sessionStorage.setItem(`openedViaLiff:${poNo}`, '1');
+      const url = `${shareData.liffBaseUrl}?mode=${encodeURIComponent(mode)}&poNo=${encodeURIComponent(poNo)}`;
+      setStatus('กำลังเปิดผ่าน LIFF URL...');
+      location.replace(url);
+    }
+
     function setStatus(text) {
       statusText.textContent = text;
     }
@@ -277,6 +292,11 @@
         return;
       }
       shareData = data;
+
+      if (shouldUseLiffUrl()) {
+        openViaLiffUrl();
+        return;
+      }
 
       if (mode === 'approve' || mode === 'reject') {
         const actionText = mode === 'approve' ? `อนุมัติ PO ${poNo}` : `ปฏิเสธ PO ${poNo}`;

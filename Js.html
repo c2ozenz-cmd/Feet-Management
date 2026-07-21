@@ -5082,8 +5082,20 @@ function sharePOFreeToLine(poNo) {
     confirmButtonColor: '#06C755'
   }).then(result => {
     if (!result.isConfirmed) return;
-    const url = `/liff/share-po.html?mode=share&poNo=${encodeURIComponent(poNo)}`;
-    window.open(url, '_blank');
+    showLoading('กำลังเปิดหน้า LIFF...');
+    fetch(`/.netlify/functions/line-share-po?poNo=${encodeURIComponent(poNo)}`)
+      .then(res => res.json())
+      .then(data => {
+        Swal.close();
+        const targetUrl = data?.liffBaseUrl
+          ? `${data.liffBaseUrl}?mode=share&poNo=${encodeURIComponent(poNo)}`
+          : `/liff/share-po.html?mode=share&poNo=${encodeURIComponent(poNo)}`;
+        window.open(targetUrl, '_blank');
+      })
+      .catch(() => {
+        Swal.close();
+        window.open(`/liff/share-po.html?mode=share&poNo=${encodeURIComponent(poNo)}`, '_blank');
+      });
   });
 }
 
