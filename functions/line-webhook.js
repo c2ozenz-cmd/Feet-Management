@@ -224,6 +224,16 @@ async function handleTextMessage(event) {
     return;
   }
 
+  const poDecisionNoMatch = cleanText.match(/(PO\d+)/i);
+  const hasApproveWord = /approve/i.test(cleanText) || cleanText.includes('\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34');
+  const hasRejectWord = /reject/i.test(cleanText) || cleanText.includes('\u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18');
+  if (poDecisionNoMatch && (hasApproveWord || hasRejectWord)) {
+    const poNo = poDecisionNoMatch[1].toUpperCase();
+    const action = hasRejectWord ? 'reject' : 'approve';
+    await handlePOTextDecision(event.replyToken, lineUserId, poNo, action);
+    return;
+  }
+
   // request approval flex via keywords in group
   const poMatch = cleanText.match(/ขออนุมัติ\s*(?:PO\s*)?(PO\d+)/i);
   const repMatch = cleanText.match(/ขออนุมัติ\s*(?:ซ่อม\s*)?(REP\d+)/i);
@@ -296,6 +306,51 @@ async function getLineGroupId(type) {
   const { data } = await supabase.from('settings').select('key,value').in('key', keys);
   const map = new Map((data || []).map(row => [row.key, row.value]));
   return keys.map(key => map.get(key)).find(Boolean) || '';
+}
+
+async function handlePOTextDecision(replyToken, lineUserId, poNo, action) {
+  const canApprove = await isLineUserAllowed(lineUserId, 'admin');
+  if (!canApprove) {
+    await logLineWorkflow('po_text_decision_permission_denied', { poNo, action, lineUserId });
+    await replyLineMessage(replyToken, '⛔ คุณไม่มีสิทธิ์อนุมัติรายการนี้\nกรุณาติดต่อผู้ดูแลระบบ');
+    return;
+  }
+
+  const approver = await getNameByLineId(lineUserId);
+  const approverName = approver ? approver.name : 'ไม่ทราบชื่อ';
+  const { data: po } = await supabase.from('purchase_orders').select('*').eq('po_no', poNo).single();
+  if (!po) {
+    await replyLineMessage(replyToken, `❌ ไม่พบข้อมูลใบสั่งซื้อ ${poNo} ในระบบ`);
+    return;
+  }
+
+  const currentStatus = po.status || '';
+  if (!['รออนุมัติ', 'ออกPO'].includes(currentStatus)) {
+    await replyLineMessage(replyToken, `ℹ️ ${poNo} ดำเนินการไปแล้ว\nสถานะปัจจุบัน: "${currentStatus}"`);
+    return;
+  }
+
+  if (action === 'reject') {
+    const res = await updatePOStatus(poNo, 'ปฏิเสธ');
+    await logLineWorkflow('po_text_reject_result', { id: poNo, success: res.success, message: res.message || '' });
+    await replyLineMessage(replyToken, res.success
+      ? `❌ ปฏิเสธใบสั่งซื้อ ${poNo}\nโดย: ${approverName}`
+      : `❌ เกิดข้อผิดพลาด: ${res.message}`);
+    return;
+  }
+
+  const res = await updatePOStatus(poNo, 'อนุมัติแล้ว');
+  await logLineWorkflow('po_text_approve_result', { id: poNo, success: res.success, message: res.message || '' });
+  if (!res.success) {
+    await replyLineMessage(replyToken, `❌ เกิดข้อผิดพลาด: ${res.message}`);
+    return;
+  }
+
+  await saveApprovalInfo('po', poNo, lineUserId, approverName);
+  const pdfRes = await generatePOPdf(poNo);
+  const dateStr = formatDateTH(new Date());
+  const flexMsg = buildPOApprovalFlex(poNo, approverName, dateStr, po.plate || '', pdfRes.pdfUrl || po.pdf_url || '');
+  await replyLineFlex(replyToken, flexMsg);
 }
 
 async function isLineUserAllowed(lineUserId, requiredRole) {

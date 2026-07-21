@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LINE Share PO</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {
+      --green: #06C755;
+      --blue: #1E3A5F;
+      --text: #172033;
+      --muted: #6B7280;
+      --border: #E5E7EB;
+      --surface: #F8FAFC;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #F3F4F6;
+      color: var(--text);
+    }
+    main {
+      width: min(480px, 100%);
+      margin: 0 auto;
+      min-height: 100vh;
+      background: #fff;
+      padding: 24px 18px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--green);
+      font-size: 24px;
+      font-weight: 800;
+    }
+    h1 { font-size: 22px; margin: 0; color: var(--blue); }
+    .subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      background: #fff;
+      margin-bottom: 14px;
+    }
+    .po-no { font-size: 20px; font-weight: 800; color: var(--blue); margin-bottom: 8px; }
+    .status {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-line;
+    }
+    .actions { display: grid; gap: 10px; margin-top: 16px; }
+    button, a.button {
+      border: 0;
+      border-radius: 8px;
+      padding: 13px 14px;
+      text-align: center;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      display: block;
+    }
+    .primary { background: var(--green); color: #fff; }
+    .secondary { background: #E5E7EB; color: #111827; }
+    .danger { background: #EF4444; color: #fff; }
+    .hidden { display: none; }
+    .small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      resize: vertical;
+      font: inherit;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <div class="brand-icon">L</div>
+      <div>
+        <h1>LINE Share PO</h1>
+        <p class="subtitle">แชร์คำขออนุมัติแบบไม่ใช้ Push quota</p>
+      </div>
+    </div>
+
+    <section class="panel">
+      <div class="po-no" id="poNoText">PO</div>
+      <div class="status" id="statusText">กำลังโหลดข้อมูล...</div>
+      <div class="actions">
+        <button class="primary hidden" id="shareBtn" type="button">แชร์เข้ากลุ่ม LINE</button>
+        <button class="primary hidden" id="sendActionBtn" type="button">ส่งคำสั่ง</button>
+        <button class="secondary hidden" id="copyBtn" type="button">คัดลอกข้อความสำรอง</button>
+        <a class="button secondary hidden" id="lineShareLink" target="_blank" rel="noopener">เปิด LINE Share แบบข้อความ</a>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="fallbackPanel">
+      <p class="small">ถ้ายังไม่ได้ตั้งค่า LIFF ID หรือ Share Target Picker ใช้งานไม่ได้ ให้คัดลอกข้อความนี้แล้วส่งเข้ากลุ่ม LINE เองได้</p>
+      <textarea id="fallbackText" readonly></textarea>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const poNo = (params.get('poNo') || '').toUpperCase();
+    const mode = params.get('mode') || 'share';
+    const statusText = document.getElementById('statusText');
+    const poNoText = document.getElementById('poNoText');
+    const shareBtn = document.getElementById('shareBtn');
+    const sendActionBtn = document.getElementById('sendActionBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const fallbackPanel = document.getElementById('fallbackPanel');
+    const fallbackText = document.getElementById('fallbackText');
+    const lineShareLink = document.getElementById('lineShareLink');
+    let shareData = null;
+
+    poNoText.textContent = poNo || 'PO';
+
+    function setStatus(text) {
+      statusText.textContent = text;
+    }
+
+    function showFallback(text) {
+      fallbackText.value = text || '';
+      fallbackPanel.classList.remove('hidden');
+      copyBtn.classList.remove('hidden');
+      lineShareLink.href = `https://line.me/R/share?text=${encodeURIComponent(text || '')}`;
+      lineShareLink.classList.remove('hidden');
+    }
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text || '');
+        setStatus('คัดลอกข้อความแล้ว สามารถนำไปวางใน LINE ได้เลย');
+      } catch (err) {
+        fallbackText.focus();
+        fallbackText.select();
+        setStatus('คัดลอกอัตโนมัติไม่ได้ กรุณาคัดลอกจากช่องข้อความด้านล่าง');
+      }
+    }
+
+    async function initLiff(liffId) {
+      if (!liffId) return false;
+      await liff.init({ liffId });
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: location.href });
+        return false;
+      }
+      return true;
+    }
+
+    async function sendAction(action) {
+      const label = action === 'approve' ? 'อนุมัติ' : 'ปฏิเสธ';
+      const text = `${label} PO ${poNo}`;
+      if (!shareData?.liffId) {
+        showFallback(text);
+        setStatus('ยังไม่ได้ตั้งค่า LIFF ID กรุณาส่งข้อความสำรองเข้าห้อง LINE');
+        return;
+      }
+      try {
+        const ready = await initLiff(shareData.liffId);
+        if (!ready) return;
+        if (!liff.isInClient() || !liff.isApiAvailable('sendMessages')) {
+          showFallback(text);
+          setStatus('กรุณาเปิดหน้านี้ในแอป LINE หรือส่งข้อความสำรองเข้าห้อง LINE');
+          return;
+        }
+        await liff.sendMessages([{ type: 'text', text }]);
+        setStatus(`ส่งคำสั่ง "${text}" แล้ว\nบอทจะตอบกลับในห้องแชทนี้`);
+        setTimeout(() => liff.closeWindow(), 900);
+      } catch (err) {
+        showFallback(text);
+        setStatus(`ส่งคำสั่งไม่สำเร็จ: ${err.message || err}`);
+      }
+    }
+
+    async function sharePO() {
+      if (!shareData?.liffId) {
+        showFallback(shareData?.shareText || '');
+        setStatus('ยังไม่ได้ตั้งค่า LINE_LIFF_ID จึงใช้ได้เฉพาะ LINE Share แบบข้อความสำรอง');
+        return;
+      }
+      try {
+        const ready = await initLiff(shareData.liffId);
+        if (!ready) return;
+        if (!liff.isApiAvailable('shareTargetPicker')) {
+          showFallback(shareData.shareText);
+          setStatus('Share Target Picker ยังใช้งานไม่ได้ กรุณาเปิดใช้ใน LINE Developers Console');
+          return;
+        }
+        const result = await liff.shareTargetPicker(shareData.messages);
+        if (result) {
+          setStatus('แชร์คำขออนุมัติเรียบร้อยแล้ว');
+          setTimeout(() => {
+            if (liff.isInClient()) liff.closeWindow();
+          }, 900);
+        } else {
+          setStatus('ยกเลิกการแชร์ ยังไม่มีข้อความถูกส่ง');
+        }
+      } catch (err) {
+        showFallback(shareData.shareText);
+        setStatus(`แชร์ผ่าน LIFF ไม่สำเร็จ: ${err.message || err}`);
+      }
+    }
+
+    async function main() {
+      if (!poNo) {
+        setStatus('ไม่พบเลข PO ใน URL');
+        return;
+      }
+      const res = await fetch(`/.netlify/functions/line-share-po?poNo=${encodeURIComponent(poNo)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setStatus(data.message || 'โหลดข้อมูล PO ไม่สำเร็จ');
+        return;
+      }
+      shareData = data;
+
+      if (mode === 'approve' || mode === 'reject') {
+        const actionText = mode === 'approve' ? `อนุมัติ PO ${poNo}` : `ปฏิเสธ PO ${poNo}`;
+        setStatus(`พร้อมส่งคำสั่ง:\n${actionText}`);
+        sendActionBtn.textContent = mode === 'approve' ? 'ส่งคำสั่งอนุมัติ' : 'ส่งคำสั่งปฏิเสธ';
+        sendActionBtn.className = mode === 'approve' ? 'primary' : 'danger';
+        sendActionBtn.classList.remove('hidden');
+        sendActionBtn.addEventListener('click', () => sendAction(mode));
+        showFallback(actionText);
+        return;
+      }
+
+      setStatus(data.liffId
+        ? `พร้อมแชร์ ${poNo} แบบ LIFF Flex\nผู้ใช้ต้องเลือกกลุ่มและกดส่งเอง`
+        : `ยังไม่ได้ตั้งค่า LINE_LIFF_ID\nใช้ปุ่มข้อความสำรองไปก่อนได้`);
+      shareBtn.classList.remove('hidden');
+      shareBtn.addEventListener('click', sharePO);
+      showFallback(data.shareText || '');
+    }
+
+    copyBtn.addEventListener('click', () => copyText(fallbackText.value));
+    main().catch(err => setStatus(err.message || String(err)));
+  </script>
+</body>
+</html>

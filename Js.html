@@ -1406,6 +1406,7 @@ function renderPOTable(pos) {
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
           ${p.printedAt ? `<button class="btn btn-sm btn-outline-warning" onclick="unmarkPOAsPrinted('${p.poNo}')" title="ยกเลิกสถานะพิมพ์แล้ว"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-outline-success" onclick="sharePOFreeToLine('${p.poNo}')" title="แชร์ฟรีผ่าน LIFF/LINE Share"><i class="bi bi-share"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งขออนุมัติเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
@@ -5052,6 +5053,26 @@ function sendPOToLineDirect(poNo) {
         showToast('error', err.message);
       })
       .sendPOToLine(poNo);
+  });
+}
+
+function sharePOFreeToLine(poNo) {
+  if (!poNo) return;
+  Swal.fire({
+    title: 'แชร์ขออนุมัติแบบฟรี?',
+    html: `<div class="text-start" style="font-size:14px;line-height:1.7">
+      ระบบจะเปิดหน้า LIFF/LINE Share สำหรับ <b>${poNo}</b><br>
+      ผู้ใช้ต้องเลือกกลุ่มและกดส่งเอง จึงไม่ใช้ Push quota ของบอท
+    </div>`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'เปิดหน้าแชร์ฟรี',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#06C755'
+  }).then(result => {
+    if (!result.isConfirmed) return;
+    const url = `/liff/share-po.html?mode=share&poNo=${encodeURIComponent(poNo)}`;
+    window.open(url, '_blank');
   });
 }
 
