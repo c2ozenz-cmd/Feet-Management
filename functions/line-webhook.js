@@ -225,9 +225,10 @@ async function handleTextMessage(event) {
   }
 
   const poDecisionNoMatch = cleanText.match(/(PO\d+)/i);
+  const isApprovalRequestText = /\u0E02\u0E2D\s*\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34/i.test(cleanText);
   const hasApproveWord = /approve/i.test(cleanText) || cleanText.includes('\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34');
   const hasRejectWord = /reject/i.test(cleanText) || cleanText.includes('\u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18');
-  if (poDecisionNoMatch && (hasApproveWord || hasRejectWord)) {
+  if (poDecisionNoMatch && !isApprovalRequestText && (hasApproveWord || hasRejectWord)) {
     const poNo = poDecisionNoMatch[1].toUpperCase();
     const action = hasRejectWord ? 'reject' : 'approve';
     await handlePOTextDecision(event.replyToken, lineUserId, poNo, action);
