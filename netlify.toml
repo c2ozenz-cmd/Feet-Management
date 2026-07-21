@@ -5,7 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["node_modules/pdfkit/js/data/**"]
+  included_files = ["functions/data/**"]
 
 [dev]
   port = 8080

@@ -3,6 +3,7 @@ node_modules/
 .netlify/
 dist/
 public/index.html
+functions/data/
 
 # Local environment variables
 .env

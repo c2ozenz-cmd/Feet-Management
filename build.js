@@ -7,6 +7,25 @@ if (!fs.existsSync(PUBLIC_DIR)) {
   fs.mkdirSync(PUBLIC_DIR);
 }
 
+const PDFKIT_DATA_SRC = path.join(__dirname, 'node_modules', 'pdfkit', 'js', 'data');
+const PDFKIT_DATA_DEST = path.join(__dirname, 'functions', 'data');
+
+function copyDir(src, dest) {
+  if (!fs.existsSync(src)) {
+    console.warn(`Warning: Directory "${src}" not found.`);
+    return;
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(srcPath, destPath);
+    else fs.copyFileSync(srcPath, destPath);
+  }
+}
+
+copyDir(PDFKIT_DATA_SRC, PDFKIT_DATA_DEST);
+
 // 1. Read entrypoint Index.html
 let indexContent = fs.readFileSync('Index.html', 'utf8');
 
