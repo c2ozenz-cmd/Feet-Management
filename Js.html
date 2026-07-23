@@ -2488,12 +2488,15 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
   else if (vatType === 'inclusive') { vat = subtotal - subtotal / 1.07; grand = subtotal; }
   const preVat = vatType === 'inclusive' ? subtotal / 1.07 : subtotal;
 
-  const logoHtml = s.COMPANY_LOGO
-    ? `<img src="${s.COMPANY_LOGO}" style="width:120px;height:120px;object-fit:contain;border-radius:50%;border:2px solid rgba(255,255,255,0.4)">`
+  const logoUrl = parseDriveUrl(s.COMPANY_LOGO || '');
+  const stampUrl = parseDriveUrl(s.COMPANY_STAMP || '');
+
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" style="width:120px;height:120px;object-fit:contain;border-radius:50%;border:2px solid rgba(255,255,255,0.4)" onerror="this.style.display='none'">`
     : `<div style="width:120px;height:120px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;color:#1a3a5c;text-align:center;font-weight:700">LOGO<br>บริษัท</div>`;
 
-  const stampHtml = s.COMPANY_STAMP
-    ? `<img src="${s.COMPANY_STAMP}" style="width:100px;height:100px;object-fit:contain;opacity:0.9">`
+  const stampHtml = stampUrl
+    ? `<img src="${stampUrl}" style="width:100px;height:100px;object-fit:contain;opacity:0.9" onerror="this.style.display='none'">`
     : `<div style="width:100px;height:100px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#bbb;text-align:center;background:#fafafa">ตรา<br>ประทับ</div>`;
 
   // ── แบ่ง items เป็น chunk หน้าละ 15 ──
@@ -2853,7 +2856,22 @@ function printPO() {
           </style>
         </head><body>
         <div style="max-width:780px;margin:0 auto">${el.outerHTML}</div>
-        <script>window.onload=()=>window.print();<\/script>
+        <script>
+          function waitForImages() {
+            const images = Array.from(document.images || []);
+            if (!images.length) return Promise.resolve();
+            return Promise.all(images.map(img => {
+              if (img.complete) return Promise.resolve();
+              return new Promise(resolve => {
+                img.onload = resolve;
+                img.onerror = resolve;
+              });
+            }));
+          }
+          window.onload = () => {
+            waitForImages().then(() => setTimeout(() => window.print(), 250));
+          };
+        <\/script>
       </body></html>`);
       win.document.close();
 
