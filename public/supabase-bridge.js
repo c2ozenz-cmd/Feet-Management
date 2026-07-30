@@ -89,6 +89,9 @@
     }
 
     async _addStockFromPO(poNo) {
+      const alreadySynced = await this._hasPOStockInLogs(poNo);
+      if (alreadySynced) return false;
+
       const { data: items, error: itemsErr } = await supabase
         .from('po_items')
         .select('*')
@@ -131,6 +134,106 @@
 
         await this._logStockTransaction('IN', partName, qty, `PO: ${poNo}`);
       }
+      return true;
+    }
+
+    async _hasPOStockInLogs(poNo) {
+      const { data, error } = await supabase
+        .from('stock_logs')
+        .select('id')
+        .eq('type', 'IN')
+        .eq('ref', `PO: ${poNo}`)
+        .limit(1);
+      if (error) throw error;
+      return (data || []).length > 0;
+    }
+
+    async _rollbackStockFromPO(poNo) {
+      const { data: logs, error: logsErr } = await supabase
+        .from('stock_logs')
+        .select('*')
+        .in('type', ['IN', 'ROLLBACK'])
+        .eq('ref', `PO: ${poNo}`);
+      if (logsErr) throw logsErr;
+
+      const netQtyByPart = new Map();
+      (logs || []).forEach(log => {
+        const partName = String(log.part_name || '').trim();
+        if (!partName) return;
+        const qty = parseFloat(log.qty) || 0;
+        const sign = log.type === 'ROLLBACK' ? -1 : 1;
+        netQtyByPart.set(partName, (netQtyByPart.get(partName) || 0) + (qty * sign));
+      });
+
+      let rollbackCount = 0;
+      for (const [partName, qty] of netQtyByPart.entries()) {
+        const rollbackQty = Math.max(0, qty);
+        if (rollbackQty <= 0) continue;
+
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('*')
+          .eq('part_name', partName)
+          .limit(1);
+        if (stockErr) throw stockErr;
+        const stock = (stockRows || [])[0];
+        if (!stock) continue;
+
+        const currentQty = parseFloat(stock.qty) || 0;
+        const { error: updateErr } = await supabase
+          .from('stock')
+          .update({ qty: Math.max(0, currentQty - rollbackQty) })
+          .eq('id', stock.id);
+        if (updateErr) throw updateErr;
+
+        await this._logStockTransaction('ROLLBACK', partName, rollbackQty, `PO: ${poNo}`);
+        rollbackCount++;
+      }
+
+      return rollbackCount;
+    }
+
+    async _rollbackPOPartsFromRepair(poNo) {
+      const { data: po, error: poErr } = await supabase
+        .from('purchase_orders')
+        .select('ref_repair_no')
+        .eq('po_no', poNo)
+        .single();
+      if (poErr) throw poErr;
+      const repairNo = po?.ref_repair_no;
+      if (!repairNo) return 0;
+
+      const { data: items, error: itemsErr } = await supabase
+        .from('po_items')
+        .select('*')
+        .eq('po_no', poNo);
+      if (itemsErr) throw itemsErr;
+
+      let rollbackCount = 0;
+      for (const item of (items || [])) {
+        const partName = item.part_name;
+        const qty = parseFloat(item.qty) || 0;
+        if (!partName || qty <= 0) continue;
+
+        const { data: existing, error: existingErr } = await supabase
+          .from('repair_parts')
+          .select('*')
+          .eq('repair_no', repairNo)
+          .eq('part_name', partName)
+          .maybeSingle();
+        if (existingErr) throw existingErr;
+        if (!existing) continue;
+
+        const nextQty = (parseFloat(existing.qty) || 0) - qty;
+        const op = nextQty > 0
+          ? supabase.from('repair_parts').update({ qty: nextQty }).eq('id', existing.id)
+          : supabase.from('repair_parts').delete().eq('id', existing.id);
+        const { error } = await op;
+        if (error) throw error;
+        rollbackCount++;
+      }
+
+      return rollbackCount;
     }
 
     async _syncPOPartsToRepair(poNo) {
@@ -781,8 +884,11 @@
         if (error) throw error;
 
         if (status === 'รับของแล้ว' && syncStock !== false) {
-          await this._addStockFromPO(poNo);
-          await this._syncPOPartsToRepair(poNo);
+          const addedStock = await this._addStockFromPO(poNo);
+          if (addedStock) await this._syncPOPartsToRepair(poNo);
+        } else if (syncStock && syncStock.rollbackPOStock) {
+          await this._rollbackStockFromPO(poNo);
+          await this._rollbackPOPartsFromRepair(poNo);
         }
         this._ok({ success: true });
       } catch (err) { this._ok({ success: false, message: err.message }); }

@@ -156,6 +156,14 @@ async function handlePostback(event) {
     }
 
     if (action === 'approve') {
+      const requesterName = normalizePersonName(po?.created_by);
+      const sameAsRequester = requesterName && requesterName === normalizePersonName(approverName);
+      if (sameAsRequester) {
+        await logLineWorkflow('po_postback_approve_blocked_self_requester', { id, lineUserId, approverName, createdBy: po?.created_by || '' });
+        await replyLineMessage(replyToken, `⚠️ ${id} เป็นใบสั่งซื้อที่คุณเป็นผู้ขออนุมัติ\nกรุณาให้ผู้จัดการเป็นผู้อนุมัติรายการนี้`);
+        return;
+      }
+
       // update status to approved
       const res = await updatePOStatus(id, 'อนุมัติแล้ว');
       await logLineWorkflow('po_update_status_result', { id, success: res.success, message: res.message || '' });
@@ -231,14 +239,9 @@ async function handleTextMessage(event) {
     return;
   }
 
-  const poDecisionNoMatch = cleanText.match(/(PO\d+)/i);
-  const isApprovalRequestText = /\u0E02\u0E2D\s*\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34/i.test(cleanText);
-  const hasApproveWord = /approve/i.test(cleanText) || cleanText.includes('\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34');
-  const hasRejectWord = /reject/i.test(cleanText) || cleanText.includes('\u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18');
-  if (poDecisionNoMatch && !isApprovalRequestText && (hasApproveWord || hasRejectWord)) {
-    const poNo = poDecisionNoMatch[1].toUpperCase();
-    const action = hasRejectWord ? 'reject' : 'approve';
-    await handlePOTextDecision(event.replyToken, lineUserId, poNo, action);
+  const poTextDecision = parsePOTextDecision(cleanText);
+  if (poTextDecision) {
+    await handlePOTextDecision(event.replyToken, lineUserId, poTextDecision.poNo, poTextDecision.action);
     return;
   }
 
@@ -291,14 +294,58 @@ async function handleTextMessage(event) {
       await replyLineMessage(event.replyToken, `ℹ️ ${poNo} ยังไม่ได้รับการอนุมัติ\nสถานะปัจจุบัน: "${po.status}"`);
       return;
     }
-    const approverName = po.approved_by || '—';
-    const approvedAt = po.approved_at ? formatDateTH(new Date(po.approved_at)) : formatDateTH(new Date());
-    await replyLineFlex(event.replyToken, buildPOApprovalFlex(poNo, approverName, approvedAt, po.plate || '', po.pdf_url || ''));
+    let approvedPo = po;
+    if (!approvedPo.pdf_url) {
+      const pdfRes = await generatePOPdf(poNo);
+      if (pdfRes.pdfUrl) {
+        const { data: freshPo } = await supabase.from('purchase_orders').select('*').eq('po_no', poNo).single();
+        approvedPo = freshPo || { ...po, pdf_url: pdfRes.pdfUrl };
+      }
+    }
+    await replyLineMessage(event.replyToken, buildPOApprovedStatusText(approvedPo));
     return;
   }
 }
 
 // ── DATABASE HELPERS (SUPABASE INTEGRATION) ──
+
+function parsePOTextDecision(text) {
+  const clean = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!clean) return null;
+
+  // Do not treat approval-request phrases as manager decisions.
+  const requestRe = /^(?:\u0E02\u0E2D|\u0E2A\u0E48\u0E07\u0E02\u0E2D|\u0E41\u0E0A\u0E23\u0E4C\u0E02\u0E2D)\s*(?:\u0E2D)?\u0E19?\u0E38\u0E21\u0E31\u0E15\u0E34/i;
+  if (requestRe.test(clean)) return null;
+
+  const approveRe = /^(?:✅\s*)?(?:\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34|approve|approved)\s*(?:PO\s*)?(PO\d+)\s*$/i;
+  const rejectRe = /^(?:❌\s*)?(?:\u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18|reject|rejected)\s*(?:PO\s*)?(PO\d+)\s*$/i;
+
+  const rejectMatch = clean.match(rejectRe);
+  if (rejectMatch) return { action: 'reject', poNo: rejectMatch[1].toUpperCase() };
+
+  const approveMatch = clean.match(approveRe);
+  if (approveMatch) return { action: 'approve', poNo: approveMatch[1].toUpperCase() };
+
+  return null;
+}
+
+function normalizePersonName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function buildPOApprovedStatusText(po) {
+  const poNo = po.po_no || '';
+  const approverName = po.approved_by || '—';
+  const approvedAt = po.approved_at ? formatDateTH(new Date(po.approved_at)) : formatDateTH(new Date());
+  const lines = [
+    `✅ อนุมัติ PO ${poNo}`,
+    `ผู้อนุมัติ: ${approverName}`,
+    `ทะเบียน: ${po.plate || '-'}`,
+    `วันที่: ${approvedAt}`
+  ];
+  if (po.pdf_url) lines.push(`PDF: ${po.pdf_url}`);
+  return lines.join('\n');
+}
 
 async function getNameByLineId(lineUserId) {
   const { data, error } = await supabase.from('profiles').select('name').eq('line_user_id', lineUserId).single();
@@ -329,6 +376,14 @@ async function handlePOTextDecision(replyToken, lineUserId, poNo, action) {
   const { data: po } = await supabase.from('purchase_orders').select('*').eq('po_no', poNo).single();
   if (!po) {
     await replyLineMessage(replyToken, `❌ ไม่พบข้อมูลใบสั่งซื้อ ${poNo} ในระบบ`);
+    return;
+  }
+
+  const requesterName = normalizePersonName(po.created_by);
+  const sameAsRequester = requesterName && requesterName === normalizePersonName(approverName);
+  if (action === 'approve' && sameAsRequester) {
+    await logLineWorkflow('po_text_approve_blocked_self_requester', { poNo, lineUserId, approverName, createdBy: po.created_by || '' });
+    await replyLineMessage(replyToken, `⚠️ ${poNo} เป็นใบสั่งซื้อที่คุณเป็นผู้ขออนุมัติ\nกรุณาให้ผู้จัดการเป็นผู้อนุมัติรายการนี้`);
     return;
   }
 

@@ -44,6 +44,10 @@ const Toast = Swal.mixin({
 
 function showToast(icon, title) { Toast.fire({ icon, title }); }
 
+function isCurrentUserAdmin() {
+  return String(currentUser?.role || '').trim().toLowerCase() === 'admin';
+}
+
 function showLoading(text = 'กำลังประมวลผล...') {
   Swal.fire({ title: text, allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 }
@@ -280,11 +284,11 @@ function initApp() {
   document.getElementById('mainApp').classList.remove('d-none');
   document.getElementById('topbarUserName').textContent = currentUser.name;
   const rb = document.getElementById('topbarRoleBadge');
-  rb.textContent = currentUser.role === 'admin' ? 'Admin' : 'User';
-  if (currentUser.role !== 'admin') rb.classList.add('role-user');
+  rb.textContent = isCurrentUserAdmin() ? 'Admin' : 'User';
+  if (!isCurrentUserAdmin()) rb.classList.add('role-user');
 
   // Hide admin-only elements for regular users
-  if (currentUser.role !== 'admin') {
+  if (!isCurrentUserAdmin()) {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
   }
 
@@ -1440,7 +1444,7 @@ function renderPOTable(pos) {
   
   tbody.innerHTML = paginatedPOs.map(p => {
     const checked = selectedPONos.has(p.poNo) ? 'checked' : '';
-    const canSelect = currentUser?.role === 'admin';
+    const canSelect = isCurrentUserAdmin();
     const grpSiblings = p.grpRef ? currentPOList.filter(x => x.grpRef === p.grpRef && x.poNo !== p.poNo) : [];
     const grpBadge = (p.grpRef && grpSiblings.length > 0)
       ? `<div style="font-size:10px;margin-top:2px"><span class="badge" style="background:rgba(99,102,241,0.13);color:#6366f1;font-weight:500">🔗 ${p.grpRef}</span></div>`
@@ -1468,6 +1472,7 @@ function renderPOTable(pos) {
           <button class="btn btn-sm btn-outline-primary" onclick="editPO('${p.poNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
           ${p.printedAt ? `<button class="btn btn-sm btn-outline-warning" onclick="unmarkPOAsPrinted('${p.poNo}')" title="ยกเลิกสถานะพิมพ์แล้ว"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
+          ${isCurrentUserAdmin() ? `<button class="btn btn-sm btn-outline-secondary" onclick="createPOApprovalLink('${p.poNo}')" title="สร้างลิงก์ให้ผู้จัดการอนุมัติ"><i class="bi bi-link-45deg"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-outline-success" onclick="sharePOFreeToLine('${p.poNo}')" title="แชร์ฟรีผ่าน LIFF/LINE Share"><i class="bi bi-share"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งขออนุมัติเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
@@ -1537,16 +1542,20 @@ function filterPOs() {
 }
 
 function togglePOSelection(poNo, checked) {
+  if (!isCurrentUserAdmin()) return;
   checked ? selectedPONos.add(poNo) : selectedPONos.delete(poNo);
   syncPOBulkActions();
 }
 
 function toggleSelectAllPOs(checkbox) {
-  currentPOList.forEach(p => {
-    checkbox.checked ? selectedPONos.add(p.poNo) : selectedPONos.delete(p.poNo);
-  });
-  document.querySelectorAll('.po-row-check').forEach(input => {
-    input.checked = checkbox.checked;
+  if (!isCurrentUserAdmin()) {
+    if (checkbox) checkbox.checked = false;
+    return;
+  }
+  const visibleChecks = Array.from(document.querySelectorAll('.po-row-check:not(:disabled)'));
+  visibleChecks.forEach(input => {
+    input.checked = !!checkbox.checked;
+    input.checked ? selectedPONos.add(input.value) : selectedPONos.delete(input.value);
   });
   syncPOBulkActions();
 }
@@ -1562,7 +1571,7 @@ function syncPOBulkActions() {
   const sendBtn = document.getElementById('poBulkSendLineBtn');
   const printBtn = document.getElementById('poBulkPrintBtn');
   const selectAll = document.getElementById('poSelectAll');
-  const visibleNos = currentPOList.map(p => p.poNo);
+  const visibleNos = Array.from(document.querySelectorAll('.po-row-check:not(:disabled)')).map(input => input.value);
   const selectedVisibleCount = visibleNos.filter(poNo => selectedPONos.has(poNo)).length;
   const totalSelected = selectedPONos.size;
 
@@ -2028,6 +2037,7 @@ function calcPOTotal() {
 function changePOStatus(status) {
   const poNo = document.getElementById('editPONo').value;
   if (!poNo) return;
+  const oldStatus = document.getElementById('poCurrentStatus')?.value || (allPOs.find(x => x.poNo === poNo)?.status || '');
 
   if (status === 'รับของแล้ว') {
     Swal.fire({
@@ -2056,6 +2066,38 @@ function changePOStatus(status) {
     }).then(result => {
       if (!result.isConfirmed) return;
       _doChangePOStatus(poNo, status, result.value.syncStock);
+    });
+
+  } else if (shouldAskPORollbackStock(oldStatus, status)) {
+    Swal.fire({
+      title: 'ย้อน Stock จาก PO นี้หรือไม่?',
+      html: `
+        <div class="text-start px-2">
+          <p class="mb-3" style="font-size:14px">
+            PO <b>${poNo}</b> เคยอยู่สถานะ <b>รับของแล้ว</b><br>
+            หากก่อนหน้านี้มีการเพิ่มอะไหล่เข้า Stock ระบบสามารถหักคืนตาม Log <b>PO: ${poNo}</b> ได้
+          </p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="rollbackPOStockCheck" checked>
+            <label class="form-check-label fw-semibold" for="rollbackPOStockCheck">
+              ย้อน Stock และรายการซ่อมที่รับจาก PO นี้
+            </label>
+          </div>
+          <div class="text-muted small ps-4">
+            <i class="bi bi-info-circle me-1"></i>
+            ระบบจะสร้าง Log ประเภท ROLLBACK เพื่อกันการย้อนซ้ำ
+          </div>
+        </div>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'ยืนยันเปลี่ยนสถานะ',
+      cancelButtonText: 'ยกเลิก',
+      preConfirm: () => ({
+        rollbackPOStock: document.getElementById('rollbackPOStockCheck').checked
+      })
+    }).then(result => {
+      if (!result.isConfirmed) return;
+      _doChangePOStatus(poNo, status, result.value.rollbackPOStock ? { rollbackPOStock: true } : false);
     });
 
   } else {
@@ -2115,6 +2157,10 @@ function _doChangePOStatus(poNo, status, syncStock) {
     .updatePOStatus(poNo, status, currentUser.name, syncStock);
 }
 
+function shouldAskPORollbackStock(oldStatus, newStatus) {
+  return oldStatus === 'รับของแล้ว' && newStatus !== 'รับของแล้ว';
+}
+
 function deletePO(poNo) {
   confirmAction(`ลบ PO ${poNo}?`, () => {
     showLoading('กำลังลบ...');
@@ -2133,6 +2179,7 @@ function changePOStatusDirect(poNo, status) {
   const p = allPOs.find(x => x.poNo === poNo);
   if (!p) return;
   if (p.status === status) return;
+  const oldStatus = p.status || '';
 
   if (status === 'รับของแล้ว') {
     Swal.fire({
@@ -2164,6 +2211,40 @@ function changePOStatusDirect(poNo, status) {
         return;
       }
       _doChangePOStatusDirect(poNo, status, result.value.syncStock);
+    });
+  } else if (shouldAskPORollbackStock(oldStatus, status)) {
+    Swal.fire({
+      title: 'ย้อน Stock จาก PO นี้หรือไม่?',
+      html: `
+        <div class="text-start px-2">
+          <p class="mb-3" style="font-size:14px">
+            PO <b>${poNo}</b> เคยอยู่สถานะ <b>รับของแล้ว</b><br>
+            หากก่อนหน้านี้มีการเพิ่มอะไหล่เข้า Stock ระบบสามารถหักคืนตาม Log <b>PO: ${poNo}</b> ได้
+          </p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="rollbackPOStockCheckDirect" checked>
+            <label class="form-check-label fw-semibold" for="rollbackPOStockCheckDirect">
+              ย้อน Stock และรายการซ่อมที่รับจาก PO นี้
+            </label>
+          </div>
+          <div class="text-muted small ps-4">
+            <i class="bi bi-info-circle me-1"></i>
+            ระบบจะสร้าง Log ประเภท ROLLBACK เพื่อกันการย้อนซ้ำ
+          </div>
+        </div>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'ยืนยันเปลี่ยนสถานะ',
+      cancelButtonText: 'ยกเลิก',
+      preConfirm: () => ({
+        rollbackPOStock: document.getElementById('rollbackPOStockCheckDirect').checked
+      })
+    }).then(result => {
+      if (!result.isConfirmed) {
+        renderPOTable(allPOs);
+        return;
+      }
+      _doChangePOStatusDirect(poNo, status, result.value.rollbackPOStock ? { rollbackPOStock: true } : false);
     });
   } else {
     confirmAction(`เปลี่ยนสถานะ PO ${poNo} เป็น "${status}"?`, () => {
@@ -2488,15 +2569,15 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
   else if (vatType === 'inclusive') { vat = subtotal - subtotal / 1.07; grand = subtotal; }
   const preVat = vatType === 'inclusive' ? subtotal / 1.07 : subtotal;
 
-  const logoUrl = parseDriveUrl(s.COMPANY_LOGO || '');
-  const stampUrl = parseDriveUrl(s.COMPANY_STAMP || '');
+  const logoImage = imageFallbackAttrs(s.COMPANY_LOGO || '');
+  const stampImage = imageFallbackAttrs(s.COMPANY_STAMP || '');
 
-  const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" style="width:120px;height:120px;object-fit:contain;border-radius:50%;border:2px solid rgba(255,255,255,0.4)" onerror="this.style.display='none'">`
+  const logoHtml = logoImage.src
+    ? `<img src="${logoImage.src}"${logoImage.fallbackAttr} style="width:120px;height:120px;object-fit:contain;border-radius:50%;border:2px solid rgba(255,255,255,0.4)" onerror="tryImageFallback(this)">`
     : `<div style="width:120px;height:120px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;color:#1a3a5c;text-align:center;font-weight:700">LOGO<br>บริษัท</div>`;
 
-  const stampHtml = stampUrl
-    ? `<img src="${stampUrl}" style="width:100px;height:100px;object-fit:contain;opacity:0.9" onerror="this.style.display='none'">`
+  const stampHtml = stampImage.src
+    ? `<img src="${stampImage.src}"${stampImage.fallbackAttr} style="width:100px;height:100px;object-fit:contain;opacity:0.9" onerror="tryImageFallback(this)">`
     : `<div style="width:100px;height:100px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#bbb;text-align:center;background:#fafafa">ตรา<br>ประทับ</div>`;
 
   // ── แบ่ง items เป็น chunk หน้าละ 15 ──
@@ -2854,21 +2935,49 @@ function printPO() {
               background-color: #f9fafb !important;
             }
           </style>
+          <script>
+            function tryImageFallback(img) {
+              const fallbackText = img.getAttribute('data-fallback-srcs') || '';
+              const fallbacks = fallbackText.split('|').filter(Boolean);
+              if (!fallbacks.length) {
+                img.style.display = 'none';
+                return false;
+              }
+              const next = fallbacks.shift();
+              img.setAttribute('data-fallback-srcs', fallbacks.join('|'));
+              img.src = next;
+              return true;
+            }
+          <\/script>
         </head><body>
         <div style="max-width:780px;margin:0 auto">${el.outerHTML}</div>
         <script>
+          function installImageFallbacks() {
+            Array.from(document.images || []).forEach(img => {
+              img.onerror = () => tryImageFallback(img);
+            });
+          }
+          function waitForOneImage(img) {
+            if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+            if (img.complete && img.naturalWidth === 0 && tryImageFallback(img)) {
+              return waitForOneImage(img);
+            }
+            return new Promise(resolve => {
+              const done = () => resolve();
+              img.onload = done;
+              img.onerror = () => {
+                if (!tryImageFallback(img)) done();
+              };
+              setTimeout(done, 4000);
+            });
+          }
           function waitForImages() {
             const images = Array.from(document.images || []);
             if (!images.length) return Promise.resolve();
-            return Promise.all(images.map(img => {
-              if (img.complete) return Promise.resolve();
-              return new Promise(resolve => {
-                img.onload = resolve;
-                img.onerror = resolve;
-              });
-            }));
+            return Promise.all(images.map(waitForOneImage));
           }
           window.onload = () => {
+            installImageFallbacks();
             waitForImages().then(() => setTimeout(() => window.print(), 250));
           };
         <\/script>
@@ -3695,6 +3804,64 @@ async function cleanupUploadedSignature(path) {
   }
 }
 
+async function uploadCompanyImage(assetType, input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const config = assetType === 'stamp'
+    ? {
+        inputId: 'settingStampUrl',
+        previewFn: previewStamp,
+        label: 'ตราประทับบริษัท'
+      }
+    : {
+        inputId: 'settingLogoUrl',
+        previewFn: previewLogo,
+        label: 'โลโก้บริษัท'
+      };
+
+  try {
+    if (!file.type.startsWith('image/')) {
+      throw new Error('กรุณาเลือกไฟล์รูปภาพเท่านั้น');
+    }
+
+    const token = appSessionToken || sessionStorage.getItem('appSessionToken') || window.appSessionToken || '';
+    if (!token) {
+      throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+    }
+
+    showLoading(`กำลังอัปโหลด${config.label}...`);
+    const base64 = await fileToBase64(file);
+    const res = await fetch('/.netlify/functions/upload-company-asset', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        assetType,
+        fileName: file.name,
+        contentType: file.type || 'image/png',
+        base64
+      })
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'อัปโหลดรูปไม่สำเร็จ');
+    }
+
+    const field = document.getElementById(config.inputId);
+    if (field) field.value = json.publicUrl || '';
+    Swal.close();
+    config.previewFn();
+    showToast('success', `อัปโหลด${config.label}เรียบร้อย กรุณากดบันทึกข้อมูลบริษัท`);
+  } catch (err) {
+    Swal.close();
+    showToast('error', err.message || 'อัปโหลดรูปไม่สำเร็จ');
+  } finally {
+    if (input) input.value = '';
+  }
+}
+
 function deleteUser(id) {
   confirmAction('ลบผู้ใช้รายนี้?', () => {
     showLoading('กำลังลบ...');
@@ -3807,6 +3974,54 @@ function parseDriveUrl(url) {
   const match = url.match(/[-\w]{25,}/);
   if (match) return 'https://drive.google.com/thumbnail?id=' + match[0] + '&sz=w400';
   return url;
+}
+
+function getDriveFileId(url) {
+  if (!url || (!url.includes('drive.google.com') && !url.includes('docs.google.com'))) return '';
+  const byQuery = String(url).match(/[?&]id=([-\w]{25,})/);
+  if (byQuery) return byQuery[1];
+  const byPath = String(url).match(/\/d\/([-\w]{25,})/);
+  if (byPath) return byPath[1];
+  const any = String(url).match(/[-\w]{25,}/);
+  return any ? any[0] : '';
+}
+
+function getPrintImageCandidates(url) {
+  const value = String(url || '').trim();
+  if (!value) return [];
+  const id = getDriveFileId(value);
+  if (!id) return [value];
+  return [
+    `https://lh3.googleusercontent.com/d/${id}=w400`,
+    `https://drive.google.com/thumbnail?id=${id}&sz=w400`,
+    `https://drive.google.com/uc?export=view&id=${id}`,
+    value
+  ].filter((item, index, arr) => item && arr.indexOf(item) === index);
+}
+
+function imageFallbackAttrs(url) {
+  const candidates = getPrintImageCandidates(url);
+  if (!candidates.length) return { src: '', fallbackAttr: '' };
+  return {
+    src: candidates[0],
+    fallbackAttr: candidates.length > 1
+      ? ` data-fallback-srcs="${escapeHtml(candidates.slice(1).join('|'))}"`
+      : ''
+  };
+}
+
+function tryImageFallback(img) {
+  if (!img) return false;
+  const fallbackText = img.getAttribute('data-fallback-srcs') || '';
+  const fallbacks = fallbackText.split('|').filter(Boolean);
+  if (!fallbacks.length) {
+    img.style.display = 'none';
+    return false;
+  }
+  const next = fallbacks.shift();
+  img.setAttribute('data-fallback-srcs', fallbacks.join('|'));
+  img.src = next;
+  return true;
 }
 
 // ── Preview โลโก้ ──
@@ -5177,6 +5392,89 @@ function sharePOFreeToLine(poNo) {
         window.open(`/liff/share-po.html?mode=share&poNo=${encodeURIComponent(poNo)}`, '_blank');
       });
   });
+}
+
+async function createPOApprovalLink(poNo) {
+  try {
+    const token = appSessionToken || sessionStorage.getItem('appSessionToken') || window.appSessionToken || '';
+    if (!token) throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+
+    showLoading('กำลังโหลดรายชื่อผู้จัดการ...');
+    const managerRes = await fetch('/.netlify/functions/po-approval-link', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const managerData = await managerRes.json().catch(() => ({}));
+    if (!managerRes.ok || !managerData.success) throw new Error(managerData.message || 'โหลดรายชื่อผู้จัดการไม่สำเร็จ');
+    const managers = managerData.managers || [];
+    if (!managers.length) throw new Error('ยังไม่มีผู้จัดการที่ตั้งค่า Line User ID ในระบบ');
+
+    const optionsHtml = managers
+      .map(manager => `<option value="${escapeHtml(manager.lineUserId)}">${escapeHtml(manager.name)} (${escapeHtml(manager.role)})</option>`)
+      .join('');
+    const selected = await Swal.fire({
+      title: 'เลือกผู้จัดการอนุมัติ',
+      html: `
+        <div class="text-start" style="font-size:14px">
+          <label class="form-label fw-semibold">ผู้จัดการที่จะได้รับลิงก์</label>
+          <select id="approvalManagerLineUserId" class="form-select">${optionsHtml}</select>
+          <div class="text-muted small mt-2">ลิงก์นี้จะบันทึกชื่อผู้จัดการคนที่เลือกเป็นผู้อนุมัติเมื่อกดอนุมัติ</div>
+        </div>`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'สร้างลิงก์',
+      cancelButtonText: 'ยกเลิก',
+      preConfirm: () => document.getElementById('approvalManagerLineUserId').value
+    });
+    if (!selected.isConfirmed) return;
+    const managerLineUserId = selected.value;
+
+    showLoading('กำลังสร้างลิงก์อนุมัติ...');
+    const res = await fetch('/.netlify/functions/po-approval-link', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ poNo, managerLineUserId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || 'สร้างลิงก์อนุมัติไม่สำเร็จ');
+
+    const message = [
+      `ขออนุมัติใบสั่งซื้อ ${poNo}`,
+      `ผู้อนุมัติ: ${data.managerName || '-'}`,
+      '',
+      data.approvalUrl,
+      '',
+      'กรุณาเปิดลิงก์เพื่อตรวจสอบรายละเอียด และกดอนุมัติ/ปฏิเสธ'
+    ].join('\n');
+
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(message);
+      copied = true;
+    } catch (err) {
+      copied = false;
+    }
+
+    Swal.fire({
+      icon: 'success',
+      title: 'สร้างลิงก์อนุมัติแล้ว',
+      html: `
+        <div class="text-start" style="font-size:14px;line-height:1.6">
+          <p class="mb-2">${copied ? 'คัดลอกข้อความพร้อมลิงก์แล้ว สามารถนำไปวางใน LINE ส่วนตัวผู้จัดการได้เลย' : 'คัดลอกอัตโนมัติไม่ได้ กรุณาคัดลอกจากช่องด้านล่าง'}</p>
+          <textarea class="form-control" rows="5" readonly>${escapeHtml(message)}</textarea>
+        </div>`,
+      showCancelButton: true,
+      confirmButtonText: 'เปิดลิงก์',
+      cancelButtonText: 'ปิด'
+    }).then(result => {
+      if (result.isConfirmed) window.open(data.approvalUrl, '_blank');
+    });
+  } catch (err) {
+    Swal.close();
+    showToast('error', err.message || 'สร้างลิงก์อนุมัติไม่สำเร็จ');
+  }
 }
 
 function executeShareToLine(text) {

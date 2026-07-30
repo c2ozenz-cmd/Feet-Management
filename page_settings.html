@@ -26,7 +26,11 @@
           <button class="btn btn-outline-secondary" onclick="previewLogo()" title="ดูตัวอย่าง">
             <i class="bi bi-eye"></i>
           </button>
+          <button class="btn btn-outline-primary" onclick="document.getElementById('settingLogoUpload').click()" title="อัปโหลดโลโก้">
+            <i class="bi bi-upload"></i>
+          </button>
         </div>
+        <input type="file" id="settingLogoUpload" accept="image/*" class="d-none" onchange="uploadCompanyImage('logo', this)">
         <div class="mt-2 d-flex align-items-center gap-3">
           <img id="settingLogoPreview" src="" alt="Logo Preview"
             style="display:none;height:80px;width:80px;object-fit:contain;border-radius:8px;border:1px solid var(--claude-border)">
@@ -49,7 +53,11 @@
           <button class="btn btn-outline-secondary" onclick="previewStamp()" title="ดูตัวอย่าง">
             <i class="bi bi-eye"></i>
           </button>
+          <button class="btn btn-outline-primary" onclick="document.getElementById('settingStampUpload').click()" title="อัปโหลดตราประทับ">
+            <i class="bi bi-upload"></i>
+          </button>
         </div>
+        <input type="file" id="settingStampUpload" accept="image/*" class="d-none" onchange="uploadCompanyImage('stamp', this)">
         <div class="mt-2 d-flex align-items-center gap-3">
           <img id="settingStampPreview" src="" alt="Stamp Preview"
             style="display:none;height:80px;width:80px;object-fit:contain;border-radius:8px;border:1px solid var(--claude-border)">
@@ -64,12 +72,12 @@
         </div>
       </div>
 
-      <!-- Tip Google Drive -->
+      <!-- Tip image upload -->
       <div class="col-12">
         <div class="p-2 rounded small" style="background:rgba(74,123,168,0.08);border:1px solid rgba(74,123,168,0.2)">
-          <i class="bi bi-google me-1" style="color:var(--claude-info)"></i>
-          <strong>วิธีใช้ Google Drive:</strong>
-          อัปโหลดรูปใน Drive → คลิกขวา "แชร์" → ตั้งเป็น "ทุกคนที่มีลิงก์" → คัดลอก URL มาวางที่นี่ ระบบจะแปลงให้อัตโนมัติ
+          <i class="bi bi-cloud-arrow-up me-1" style="color:var(--claude-info)"></i>
+          <strong>แนะนำ:</strong>
+          ใช้ปุ่มอัปโหลดเพื่อเก็บรูปไว้ในระบบโดยตรง ไม่ต้องพึ่ง Google Drive และควรใช้ไฟล์ .png พื้นหลังโปร่งใสสำหรับตราประทับ
         </div>
       </div>
 

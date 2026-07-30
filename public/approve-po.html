@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>อนุมัติใบสั่งซื้อ</title>
+  <style>
+    :root {
+      --blue: #1E3A5F;
+      --green: #10B981;
+      --red: #EF4444;
+      --text: #1F2937;
+      --muted: #6B7280;
+      --border: #E5D8C8;
+      --surface: #F7F1E8;
+      --panel: #FFFFFF;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--surface);
+      color: var(--text);
+    }
+    main { width: min(980px, 100%); margin: 0 auto; padding: 16px; }
+    .header {
+      background: var(--blue);
+      color: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .header h1 { margin: 0; font-size: 22px; }
+    .header p { margin: 4px 0 0; color: #D7E5F4; font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: 0 4px 14px rgba(48, 38, 28, 0.08);
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      background: #FFF7ED;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    .summary small { color: #9A5A28; font-weight: 700; display: block; }
+    .summary strong { color: #C2410C; font-size: 20px; }
+    .row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #F0E8DD;
+      font-size: 14px;
+    }
+    .row:last-child { border-bottom: 0; }
+    .label { color: var(--muted); }
+    .value { font-weight: 700; text-align: right; }
+    .status { color: var(--muted); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    button, a.button {
+      border: 0;
+      border-radius: 8px;
+      padding: 13px 14px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      display: block;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .approve { background: var(--green); }
+    .reject { background: var(--red); }
+    .secondary { background: #E5E7EB; color: #111827; }
+    .pdf-card { padding: 0; overflow: hidden; }
+    .pdf-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--blue);
+    }
+    iframe {
+      display: block;
+      width: 100%;
+      height: 78vh;
+      border: 0;
+      background: #F3F4F6;
+    }
+    .hidden { display: none; }
+    @media (max-width: 780px) {
+      main { padding: 10px; }
+      .grid { grid-template-columns: 1fr; }
+      iframe { height: 68vh; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="header">
+      <h1>อนุมัติใบสั่งซื้อ</h1>
+      <p id="subtitle">กำลังโหลดข้อมูล...</p>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <div class="status" id="statusBox">กำลังโหลดข้อมูล PO...</div>
+        <div id="poContent" class="hidden">
+          <div class="summary">
+            <div>
+              <small>ยอดรวม</small>
+              <strong id="poTotal">0.00</strong>
+            </div>
+            <div style="text-align:right">
+              <small>จำนวนรายการ</small>
+              <strong id="poItemCount">0</strong>
+            </div>
+          </div>
+          <div class="row"><div class="label">เลข PO</div><div class="value" id="poNo">-</div></div>
+          <div class="row"><div class="label">ร้านค้า</div><div class="value" id="shopName">-</div></div>
+          <div class="row"><div class="label">ทะเบียน</div><div class="value" id="plate">-</div></div>
+          <div class="row"><div class="label">ผู้ขอ</div><div class="value" id="createdBy">-</div></div>
+          <div class="row"><div class="label">ผู้อนุมัติ</div><div class="value" id="managerName">-</div></div>
+          <div class="row"><div class="label">สถานะ</div><div class="value" id="poStatus">-</div></div>
+          <div class="actions" id="actionBox">
+            <button class="approve" id="approveBtn" type="button">อนุมัติ</button>
+            <button class="reject" id="rejectBtn" type="button">ปฏิเสธ</button>
+          </div>
+        </div>
+        <div class="status hidden" id="resultText"></div>
+      </section>
+
+      <section class="card pdf-card">
+        <div class="pdf-toolbar">
+          <span>PDF ใบสั่งซื้อ</span>
+          <a class="button secondary hidden" id="pdfLink" target="_blank" rel="noopener">เปิด PDF</a>
+        </div>
+        <iframe id="pdfFrame" title="PO PDF"></iframe>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token') || '';
+    const statusBox = document.getElementById('statusBox');
+    const poContent = document.getElementById('poContent');
+    const actionBox = document.getElementById('actionBox');
+    const resultText = document.getElementById('resultText');
+    const pdfLink = document.getElementById('pdfLink');
+    const pdfFrame = document.getElementById('pdfFrame');
+    const approveBtn = document.getElementById('approveBtn');
+    const rejectBtn = document.getElementById('rejectBtn');
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value || '-';
+    }
+
+    function setBusy(busy) {
+      approveBtn.disabled = busy;
+      rejectBtn.disabled = busy;
+    }
+
+    function setPdf(url) {
+      if (!url) return;
+      pdfFrame.src = url;
+      pdfLink.href = url;
+      pdfLink.classList.remove('hidden');
+    }
+
+    function renderPO(po) {
+      document.getElementById('subtitle').textContent = po.poNo || '';
+      setText('poTotal', `${po.totalText} บาท`);
+      setText('poItemCount', `${po.itemCount} รายการ`);
+      setText('poNo', po.poNo);
+      setText('shopName', po.shopName);
+      setText('plate', po.plate);
+      setText('createdBy', po.createdBy);
+      setText('managerName', po.request?.managerName);
+      setText('poStatus', po.status);
+      setPdf(po.pdfUrl);
+      poContent.classList.remove('hidden');
+
+      const ready = po.request?.status === 'pending' && ['รออนุมัติ', 'ออกPO'].includes(po.status);
+      actionBox.classList.toggle('hidden', !ready);
+      statusBox.textContent = ready
+        ? 'ตรวจสอบ PDF แล้วกดอนุมัติหรือปฏิเสธ'
+        : `ลิงก์นี้ไม่พร้อมใช้งาน\nสถานะคำขอ: ${po.request?.status || '-'}\nสถานะ PO: ${po.status || '-'}`;
+    }
+
+    async function loadPO() {
+      if (!token) {
+        statusBox.textContent = 'ไม่พบ token ในลิงก์';
+        return;
+      }
+      const res = await fetch(`/.netlify/functions/po-approval?token=${encodeURIComponent(token)}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        statusBox.textContent = json.message || 'โหลดข้อมูลไม่สำเร็จ';
+        return;
+      }
+      renderPO(json.po);
+    }
+
+    async function submitAction(action) {
+      const ok = confirm(action === 'approve' ? 'ยืนยันอนุมัติ PO นี้?' : 'ยืนยันปฏิเสธ PO นี้?');
+      if (!ok) return;
+
+      setBusy(true);
+      resultText.classList.remove('hidden');
+      resultText.textContent = action === 'approve'
+        ? 'กำลังอนุมัติและสร้าง PDF พร้อมลายเซ็น...'
+        : 'กำลังบันทึกผลปฏิเสธ...';
+      try {
+        const res = await fetch(`/.netlify/functions/po-approval?token=${encodeURIComponent(token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.success) throw new Error(json.message || 'ดำเนินการไม่สำเร็จ');
+        actionBox.classList.add('hidden');
+        resultText.textContent = `${json.message}\nเลข PO: ${json.po?.poNo || '-'}\nผู้อนุมัติ: ${json.po?.approvedBy || '-'}`;
+        if (json.pdfUrl) setPdf(json.pdfUrl);
+        await loadPO();
+      } catch (err) {
+        resultText.textContent = err.message || String(err);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    approveBtn.addEventListener('click', () => submitAction('approve'));
+    rejectBtn.addEventListener('click', () => submitAction('reject'));
+    loadPO();
+  </script>
+</body>
+</html>
