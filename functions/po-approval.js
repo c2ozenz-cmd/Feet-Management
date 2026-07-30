@@ -28,6 +28,8 @@ function publicPO(po, items, request) {
   const vatType = po.vat_type || 'none';
   const vat = vatType === 'exclusive' ? subtotal * 0.07 : (vatType === 'inclusive' ? subtotal - (subtotal / 1.07) : 0);
   const grandTotal = vatType === 'exclusive' ? subtotal + vat : subtotal;
+  const requestPdfUrl = request.requesterPdfUrls?.[po.po_no] || request.requesterPdfUrl || '';
+  const pdfUrl = request.status === 'pending' ? (requestPdfUrl || po.pdf_url || '') : (po.pdf_url || requestPdfUrl);
   return {
     poNo: po.po_no,
     shopName: po.shop_name || '',
@@ -38,7 +40,7 @@ function publicPO(po, items, request) {
     createdBy: po.created_by || '',
     approvedBy: po.approved_by || '',
     approvedAt: po.approved_at || '',
-    pdfUrl: request.requesterPdfUrl || po.pdf_url || '',
+    pdfUrl,
     itemCount: (items || []).length,
     totalText: formatMoney(grandTotal),
     items: (items || []).slice(0, 8).map(item => ({
@@ -93,6 +95,24 @@ async function loadPO(poNo) {
   return { po: poRes.data, items: itemsRes.data || [] };
 }
 
+function getRequestPoNos(request) {
+  return (Array.isArray(request.poNos) && request.poNos.length ? request.poNos : [request.poNo])
+    .map(poNo => String(poNo || '').trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function normalizeSelectedPoNos(body, allowedNos) {
+  const selected = Array.isArray(body.poNos) && body.poNos.length
+    ? body.poNos.map(poNo => String(poNo || '').trim().toUpperCase()).filter(Boolean)
+    : allowedNos;
+  const allowed = new Set(allowedNos);
+  return [...new Set(selected)].filter(poNo => allowed.has(poNo));
+}
+
+function isApprovalReadyStatus(status) {
+  return ['รออนุมัติ', 'ออกPO'].includes(status || '');
+}
+
 async function generatePOPdf(poNo) {
   const res = await generatePdfFunction.handler({
     httpMethod: 'GET',
@@ -107,8 +127,12 @@ async function generatePOPdf(poNo) {
 
 async function handleGet(token) {
   const request = await loadRequest(token);
-  const { po, items } = await loadPO(request.poNo);
-  return json(200, { success: true, po: publicPO(po, items, request) });
+  const poNos = getRequestPoNos(request);
+  const pos = await Promise.all(poNos.map(async poNo => {
+    const { po, items } = await loadPO(poNo);
+    return publicPO(po, items, request);
+  }));
+  return json(200, { success: true, po: pos[0], pos, count: pos.length });
 }
 
 async function handlePost(token, body) {
@@ -127,50 +151,64 @@ async function handlePost(token, body) {
     return json(400, { success: false, message: 'Action ไม่ถูกต้อง' });
   }
 
-  const { po, items } = await loadPO(request.poNo);
+  const allowedNos = getRequestPoNos(request);
+  const selectedPoNos = normalizeSelectedPoNos(body, allowedNos);
+  if (!selectedPoNos.length) {
+    return json(400, { success: false, message: 'กรุณาเลือก PO อย่างน้อย 1 ใบ' });
+  }
+
   const approverName = request.managerName || '';
   if (!request.managerLineUserId || !approverName) {
     return json(403, { success: false, message: 'ลิงก์นี้ไม่ได้ผูกกับผู้จัดการ' });
   }
 
-  if (!['รออนุมัติ', 'ออกPO'].includes(po.status || '')) {
-    return json(409, { success: false, message: `PO ${po.po_no} สถานะปัจจุบัน: ${po.status || '-'}` });
-  }
-  if (normalizeName(po.created_by) && normalizeName(po.created_by) === normalizeName(approverName)) {
-    return json(403, { success: false, message: 'ผู้ขออนุมัติไม่สามารถอนุมัติ PO ของตัวเองได้' });
-  }
-
   const now = new Date().toISOString();
-  let pdfUrl = po.pdf_url || '';
-  if (action === 'approve') {
+  const results = [];
+  const publicResults = [];
+
+  for (const poNo of selectedPoNos) {
+    const { po, items } = await loadPO(poNo);
+    if (!isApprovalReadyStatus(po.status)) {
+      return json(409, { success: false, message: `PO ${po.po_no} สถานะปัจจุบัน: ${po.status || '-'}` });
+    }
+    if (normalizeName(po.created_by) && normalizeName(po.created_by) === normalizeName(approverName)) {
+      return json(403, { success: false, message: `ผู้ขออนุมัติไม่สามารถอนุมัติ PO ${po.po_no} ของตัวเองได้` });
+    }
+    let pdfUrl = po.pdf_url || '';
+    const nextStatus = action === 'approve' ? 'อนุมัติแล้ว' : 'ปฏิเสธ';
     const { error } = await supabase.from('purchase_orders').update({
-      status: 'อนุมัติแล้ว',
+      status: nextStatus,
       approved_by: approverName,
       approved_at: now
     }).eq('po_no', po.po_no);
     if (error) throw error;
-    pdfUrl = await generatePOPdf(po.po_no);
-  } else {
-    const { error } = await supabase.from('purchase_orders').update({
-      status: 'ปฏิเสธ',
-      approved_by: approverName,
-      approved_at: now
-    }).eq('po_no', po.po_no);
-    if (error) throw error;
+    if (action === 'approve') {
+      pdfUrl = await generatePOPdf(po.po_no);
+    }
+    const updatedPO = { ...po, status: nextStatus, approved_by: approverName, approved_at: now, pdf_url: pdfUrl };
+    const publicUpdatedPO = publicPO(updatedPO, items, request);
+    publicUpdatedPO.pdfUrl = pdfUrl || publicUpdatedPO.pdfUrl;
+    results.push({ success: true, poNo: po.po_no, pdfUrl, status: nextStatus });
+    publicResults.push(publicUpdatedPO);
   }
 
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.actionBy = approverName;
   request.actionAt = now;
-  request.pdfUrl = pdfUrl;
+  request.selectedPoNos = selectedPoNos;
+  request.results = results;
+  request.pdfUrl = results[0]?.pdfUrl || '';
   await saveRequest(token, request);
 
   return json(200, {
     success: true,
     action,
     message: action === 'approve' ? 'อนุมัติ PO เรียบร้อย' : 'ปฏิเสธ PO เรียบร้อย',
-    pdfUrl,
-    po: publicPO({ ...po, status: action === 'approve' ? 'อนุมัติแล้ว' : 'ปฏิเสธ', approved_by: approverName, approved_at: now, pdf_url: pdfUrl }, items, request)
+    pdfUrl: results[0]?.pdfUrl || '',
+    results,
+    po: publicResults[0],
+    pos: publicResults,
+    count: publicResults.length
   });
 }
 

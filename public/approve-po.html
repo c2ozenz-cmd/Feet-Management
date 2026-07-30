@@ -18,26 +18,36 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
+      height: 100vh;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--surface);
       color: var(--text);
+      overflow: hidden;
     }
-    main { width: min(980px, 100%); margin: 0 auto; padding: 16px; }
+    main {
+      width: min(1180px, 100%);
+      height: 100vh;
+      margin: 0 auto;
+      padding: 12px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      overflow: hidden;
+    }
     .header {
       background: var(--blue);
       color: #fff;
       border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 12px;
+      padding: 14px 16px;
     }
     .header h1 { margin: 0; font-size: 22px; }
     .header p { margin: 4px 0 0; color: #D7E5F4; font-size: 14px; }
     .grid {
       display: grid;
-      grid-template-columns: minmax(280px, 360px) 1fr;
+      grid-template-columns: minmax(300px, 390px) 1fr;
       gap: 12px;
-      align-items: start;
+      align-items: stretch;
+      min-height: 0;
     }
     .card {
       background: var(--panel);
@@ -45,6 +55,13 @@
       border-radius: 8px;
       padding: 14px;
       box-shadow: 0 4px 14px rgba(48, 38, 28, 0.08);
+      min-height: 0;
+    }
+    .side-card {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+      gap: 10px;
+      overflow: hidden;
     }
     .summary {
       display: grid;
@@ -53,13 +70,12 @@
       background: #FFF7ED;
       border-radius: 8px;
       padding: 10px;
-      margin-bottom: 10px;
     }
     .summary small { color: #9A5A28; font-weight: 700; display: block; }
     .summary strong { color: #C2410C; font-size: 20px; }
     .row {
       display: grid;
-      grid-template-columns: 110px 1fr;
+      grid-template-columns: 105px 1fr;
       gap: 8px;
       padding: 7px 0;
       border-bottom: 1px solid #F0E8DD;
@@ -69,7 +85,34 @@
     .label { color: var(--muted); }
     .value { font-weight: 700; text-align: right; }
     .status { color: var(--muted); font-size: 14px; line-height: 1.5; white-space: pre-line; }
-    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .po-list {
+      overflow: auto;
+      border: 1px solid #F0E8DD;
+      border-radius: 8px;
+      background: #FFFCF7;
+    }
+    .po-list.hidden { display: none; }
+    .po-item {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #F0E8DD;
+      background: transparent;
+      color: var(--text);
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 9px;
+      align-items: start;
+      padding: 10px;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+    }
+    .po-item:last-child { border-bottom: 0; }
+    .po-item.active { background: #EAF3FF; }
+    .po-item input { margin-top: 3px; }
+    .po-item strong { color: var(--blue); display: block; }
+    .po-item small { color: var(--muted); display: block; margin-top: 2px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button, a.button {
       border: 0;
       border-radius: 8px;
@@ -85,8 +128,14 @@
     button:disabled { opacity: 0.6; cursor: wait; }
     .approve { background: var(--green); }
     .reject { background: var(--red); }
-    .secondary { background: #E5E7EB; color: #111827; }
-    .pdf-card { padding: 0; overflow: hidden; }
+    .secondary { background: #E5E7EB; color: #111827; padding: 9px 11px; font-size: 14px; }
+    .pdf-card {
+      padding: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
     .pdf-toolbar {
       display: flex;
       justify-content: space-between;
@@ -102,15 +151,20 @@
     iframe {
       display: block;
       width: 100%;
-      height: 78vh;
+      height: 100%;
       border: 0;
       background: #F3F4F6;
     }
     .hidden { display: none; }
     @media (max-width: 780px) {
-      main { padding: 10px; }
+      body { height: auto; overflow: auto; }
+      main { height: auto; min-height: 100vh; padding: 10px; overflow: visible; display: block; }
+      .header { margin-bottom: 10px; }
       .grid { grid-template-columns: 1fr; }
-      iframe { height: 68vh; }
+      .side-card { display: block; }
+      .summary, .po-list, .actions, #detailBox, #resultText { margin-top: 10px; }
+      .po-list { max-height: 270px; }
+      .pdf-card { height: min(72vh, 760px); margin-top: 10px; }
     }
   </style>
 </head>
@@ -122,36 +176,37 @@
     </section>
 
     <div class="grid">
-      <section class="card">
+      <section class="card side-card">
         <div class="status" id="statusBox">กำลังโหลดข้อมูล PO...</div>
-        <div id="poContent" class="hidden">
-          <div class="summary">
-            <div>
-              <small>ยอดรวม</small>
-              <strong id="poTotal">0.00</strong>
-            </div>
-            <div style="text-align:right">
-              <small>จำนวนรายการ</small>
-              <strong id="poItemCount">0</strong>
-            </div>
+        <div id="summaryBox" class="summary hidden">
+          <div>
+            <small>ยอดรวมที่เลือก</small>
+            <strong id="selectedTotal">0.00</strong>
           </div>
+          <div style="text-align:right">
+            <small>จำนวน PO</small>
+            <strong id="selectedCount">0</strong>
+          </div>
+        </div>
+        <div id="poList" class="po-list hidden"></div>
+        <div id="detailBox" class="hidden">
           <div class="row"><div class="label">เลข PO</div><div class="value" id="poNo">-</div></div>
           <div class="row"><div class="label">ร้านค้า</div><div class="value" id="shopName">-</div></div>
           <div class="row"><div class="label">ทะเบียน</div><div class="value" id="plate">-</div></div>
           <div class="row"><div class="label">ผู้ขอ</div><div class="value" id="createdBy">-</div></div>
           <div class="row"><div class="label">ผู้อนุมัติ</div><div class="value" id="managerName">-</div></div>
           <div class="row"><div class="label">สถานะ</div><div class="value" id="poStatus">-</div></div>
-          <div class="actions" id="actionBox">
-            <button class="approve" id="approveBtn" type="button">อนุมัติ</button>
-            <button class="reject" id="rejectBtn" type="button">ปฏิเสธ</button>
-          </div>
+        </div>
+        <div class="actions hidden" id="actionBox">
+          <button class="approve" id="approveBtn" type="button">อนุมัติ</button>
+          <button class="reject" id="rejectBtn" type="button">ปฏิเสธ</button>
         </div>
         <div class="status hidden" id="resultText"></div>
       </section>
 
       <section class="card pdf-card">
         <div class="pdf-toolbar">
-          <span>PDF ใบสั่งซื้อ</span>
+          <span id="pdfTitle">PDF ใบสั่งซื้อ</span>
           <a class="button secondary hidden" id="pdfLink" target="_blank" rel="noopener">เปิด PDF</a>
         </div>
         <iframe id="pdfFrame" title="PO PDF"></iframe>
@@ -163,13 +218,20 @@
     const params = new URLSearchParams(location.search);
     const token = params.get('token') || '';
     const statusBox = document.getElementById('statusBox');
-    const poContent = document.getElementById('poContent');
+    const summaryBox = document.getElementById('summaryBox');
+    const poList = document.getElementById('poList');
+    const detailBox = document.getElementById('detailBox');
     const actionBox = document.getElementById('actionBox');
     const resultText = document.getElementById('resultText');
     const pdfLink = document.getElementById('pdfLink');
     const pdfFrame = document.getElementById('pdfFrame');
+    const pdfTitle = document.getElementById('pdfTitle');
     const approveBtn = document.getElementById('approveBtn');
     const rejectBtn = document.getElementById('rejectBtn');
+
+    let currentPOs = [];
+    let activePoNo = '';
+    let selectedPoNos = new Set();
 
     function setText(id, value) {
       document.getElementById(id).textContent = value || '-';
@@ -180,31 +242,120 @@
       rejectBtn.disabled = busy;
     }
 
-    function setPdf(url) {
-      if (!url) return;
-      pdfFrame.src = url;
+    function moneyNumber(text) {
+      return parseFloat(String(text || '0').replace(/,/g, '')) || 0;
+    }
+
+    function formatMoney(value) {
+      return (parseFloat(value) || 0).toLocaleString('th-TH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function setPdf(po) {
+      const url = po?.pdfUrl || '';
+      pdfTitle.textContent = po?.poNo ? `PDF ${po.poNo}` : 'PDF ใบสั่งซื้อ';
+      if (!url) {
+        pdfFrame.removeAttribute('src');
+        pdfLink.classList.add('hidden');
+        return;
+      }
+      const fitUrl = `${url}${url.includes('#') ? '&' : '#'}toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+      pdfFrame.src = fitUrl;
       pdfLink.href = url;
       pdfLink.classList.remove('hidden');
     }
 
-    function renderPO(po) {
-      document.getElementById('subtitle').textContent = po.poNo || '';
-      setText('poTotal', `${po.totalText} บาท`);
-      setText('poItemCount', `${po.itemCount} รายการ`);
+    function renderDetail(po) {
+      if (!po) return;
+      activePoNo = po.poNo;
+      document.getElementById('subtitle').textContent = currentPOs.length > 1
+        ? `รายการขออนุมัติ ${currentPOs.length} ใบ`
+        : po.poNo || '';
       setText('poNo', po.poNo);
       setText('shopName', po.shopName);
       setText('plate', po.plate);
       setText('createdBy', po.createdBy);
       setText('managerName', po.request?.managerName);
       setText('poStatus', po.status);
-      setPdf(po.pdfUrl);
-      poContent.classList.remove('hidden');
+      setPdf(po);
+      detailBox.classList.remove('hidden');
+      renderPOList();
+    }
 
-      const ready = po.request?.status === 'pending' && ['รออนุมัติ', 'ออกPO'].includes(po.status);
+    function renderPOList() {
+      if (currentPOs.length <= 1) {
+        poList.classList.add('hidden');
+        return;
+      }
+      poList.classList.remove('hidden');
+      poList.innerHTML = currentPOs.map(po => {
+        const checked = selectedPoNos.has(po.poNo) ? 'checked' : '';
+        const active = po.poNo === activePoNo ? 'active' : '';
+        return `
+          <div class="po-item ${active}" data-po-no="${po.poNo}" role="button" tabindex="0">
+            <input type="checkbox" ${checked} aria-label="เลือก ${po.poNo}">
+            <span>
+              <strong>${po.poNo}</strong>
+              <small>${po.shopName || '-'} | ${po.totalText || '0.00'} บาท</small>
+              <small>${po.status || '-'}</small>
+            </span>
+          </div>`;
+      }).join('');
+      poList.querySelectorAll('.po-item').forEach(item => {
+        const poNo = item.dataset.poNo;
+        item.addEventListener('click', event => {
+          if (event.target.tagName === 'INPUT') {
+            event.stopPropagation();
+            item.querySelector('input').checked ? selectedPoNos.add(poNo) : selectedPoNos.delete(poNo);
+            updateSummary();
+            updateActionLabels();
+            return;
+          }
+          const po = currentPOs.find(x => x.poNo === poNo);
+          renderDetail(po);
+        });
+        item.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          const po = currentPOs.find(x => x.poNo === poNo);
+          renderDetail(po);
+        });
+      });
+    }
+
+    function updateSummary() {
+      const selected = currentPOs.filter(po => selectedPoNos.has(po.poNo));
+      const total = selected.reduce((sum, po) => sum + moneyNumber(po.totalText), 0);
+      setText('selectedTotal', `${formatMoney(total)} บาท`);
+      setText('selectedCount', `${selected.length}/${currentPOs.length}`);
+      summaryBox.classList.remove('hidden');
+    }
+
+    function updateActionLabels() {
+      const count = selectedPoNos.size || currentPOs.length;
+      approveBtn.textContent = count > 1 ? `อนุมัติ ${count} ใบ` : 'อนุมัติ';
+      rejectBtn.textContent = count > 1 ? `ปฏิเสธ ${count} ใบ` : 'ปฏิเสธ';
+    }
+
+    function renderPOs(pos) {
+      currentPOs = pos || [];
+      selectedPoNos = new Set(currentPOs.map(po => po.poNo));
+      const first = currentPOs[0];
+      if (!first) {
+        statusBox.textContent = 'ไม่พบข้อมูล PO';
+        return;
+      }
+      const ready = first.request?.status === 'pending'
+        && currentPOs.every(po => ['รออนุมัติ', 'ออกPO'].includes(po.status));
       actionBox.classList.toggle('hidden', !ready);
       statusBox.textContent = ready
         ? 'ตรวจสอบ PDF แล้วกดอนุมัติหรือปฏิเสธ'
-        : `ลิงก์นี้ไม่พร้อมใช้งาน\nสถานะคำขอ: ${po.request?.status || '-'}\nสถานะ PO: ${po.status || '-'}`;
+        : `ลิงก์นี้ไม่พร้อมใช้งาน\nสถานะคำขอ: ${first.request?.status || '-'}\nสถานะ PO: ${currentPOs.map(po => `${po.poNo} ${po.status || '-'}`).join(', ')}`;
+      renderDetail(first);
+      updateSummary();
+      updateActionLabels();
     }
 
     async function loadPO() {
@@ -218,11 +369,17 @@
         statusBox.textContent = json.message || 'โหลดข้อมูลไม่สำเร็จ';
         return;
       }
-      renderPO(json.po);
+      renderPOs(json.pos || (json.po ? [json.po] : []));
     }
 
     async function submitAction(action) {
-      const ok = confirm(action === 'approve' ? 'ยืนยันอนุมัติ PO นี้?' : 'ยืนยันปฏิเสธ PO นี้?');
+      const poNos = [...selectedPoNos];
+      if (!poNos.length) {
+        alert('กรุณาเลือก PO อย่างน้อย 1 ใบ');
+        return;
+      }
+      const label = poNos.length > 1 ? `PO ${poNos.length} ใบ` : poNos[0];
+      const ok = confirm(action === 'approve' ? `ยืนยันอนุมัติ ${label}?` : `ยืนยันปฏิเสธ ${label}?`);
       if (!ok) return;
 
       setBusy(true);
@@ -234,13 +391,14 @@
         const res = await fetch(`/.netlify/functions/po-approval?token=${encodeURIComponent(token)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action })
+          body: JSON.stringify({ action, poNos })
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.success) throw new Error(json.message || 'ดำเนินการไม่สำเร็จ');
         actionBox.classList.add('hidden');
-        resultText.textContent = `${json.message}\nเลข PO: ${json.po?.poNo || '-'}\nผู้อนุมัติ: ${json.po?.approvedBy || '-'}`;
-        if (json.pdfUrl) setPdf(json.pdfUrl);
+        const lines = (json.results || []).map(item => `${item.poNo}: ${item.status}`);
+        resultText.textContent = `${json.message}\n${lines.join('\n')}\nผู้อนุมัติ: ${json.po?.approvedBy || '-'}`;
+        if (json.po) setPdf(json.po);
         await loadPO();
       } catch (err) {
         resultText.textContent = err.message || String(err);

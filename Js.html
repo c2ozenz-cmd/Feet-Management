@@ -1569,6 +1569,7 @@ function clearPOSelection() {
 function syncPOBulkActions() {
   const countEl = document.getElementById('poSelectedCount');
   const sendBtn = document.getElementById('poBulkSendLineBtn');
+  const approvalLinkBtn = document.getElementById('poBulkApprovalLinkBtn');
   const printBtn = document.getElementById('poBulkPrintBtn');
   const selectAll = document.getElementById('poSelectAll');
   const visibleNos = Array.from(document.querySelectorAll('.po-row-check:not(:disabled)')).map(input => input.value);
@@ -1577,6 +1578,7 @@ function syncPOBulkActions() {
 
   if (countEl) countEl.textContent = `เลือก ${totalSelected} รายการ`;
   if (sendBtn) sendBtn.disabled = totalSelected === 0;
+  if (approvalLinkBtn) approvalLinkBtn.disabled = totalSelected === 0;
   if (printBtn) printBtn.disabled = totalSelected === 0;
   if (selectAll) {
     selectAll.checked = visibleNos.length > 0 && selectedVisibleCount === visibleNos.length;
@@ -5394,8 +5396,23 @@ function sharePOFreeToLine(poNo) {
   });
 }
 
-async function createPOApprovalLink(poNo) {
+function createSelectedPOApprovalLink() {
+  const orderedNos = getOrderedSelectedPONos();
+  if (!orderedNos.length) {
+    showToast('warning', 'กรุณาเลือก PO ก่อน');
+    return;
+  }
+  createPOApprovalLink(orderedNos);
+}
+
+async function createPOApprovalLink(poInput) {
   try {
+    const poNos = (Array.isArray(poInput) ? poInput : [poInput])
+      .map(poNo => String(poNo || '').trim().toUpperCase())
+      .filter(Boolean);
+    if (!poNos.length) throw new Error('กรุณาระบุเลข PO');
+    const isBatch = poNos.length > 1;
+    const poLabel = isBatch ? `${poNos.length} ใบ` : poNos[0];
     const token = appSessionToken || sessionStorage.getItem('appSessionToken') || window.appSessionToken || '';
     if (!token) throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
 
@@ -5415,6 +5432,9 @@ async function createPOApprovalLink(poNo) {
       title: 'เลือกผู้จัดการอนุมัติ',
       html: `
         <div class="text-start" style="font-size:14px">
+          <div class="alert alert-light border mb-3">
+            <b>รายการขออนุมัติ:</b> ${escapeHtml(isBatch ? poNos.join(', ') : poNos[0])}
+          </div>
           <label class="form-label fw-semibold">ผู้จัดการที่จะได้รับลิงก์</label>
           <select id="approvalManagerLineUserId" class="form-select">${optionsHtml}</select>
           <div class="text-muted small mt-2">ลิงก์นี้จะบันทึกชื่อผู้จัดการคนที่เลือกเป็นผู้อนุมัติเมื่อกดอนุมัติ</div>
@@ -5435,19 +5455,29 @@ async function createPOApprovalLink(poNo) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ poNo, managerLineUserId })
+      body: JSON.stringify({ poNo: poNos[0], poNos, managerLineUserId })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) throw new Error(data.message || 'สร้างลิงก์อนุมัติไม่สำเร็จ');
 
-    const message = [
-      `ขออนุมัติใบสั่งซื้อ ${poNo}`,
-      `ผู้อนุมัติ: ${data.managerName || '-'}`,
-      '',
-      data.approvalUrl,
-      '',
-      'กรุณาเปิดลิงก์เพื่อตรวจสอบรายละเอียด และกดอนุมัติ/ปฏิเสธ'
-    ].join('\n');
+    const message = isBatch
+      ? [
+          `ขออนุมัติใบสั่งซื้อ ${poLabel}`,
+          `ผู้อนุมัติ: ${data.managerName || '-'}`,
+          `รายการ: ${poNos.join(', ')}`,
+          '',
+          data.approvalUrl,
+          '',
+          'กรุณาเปิดลิงก์เพื่อตรวจสอบรายละเอียด และกดอนุมัติ/ปฏิเสธ'
+        ].join('\n')
+      : [
+          `ขออนุมัติใบสั่งซื้อ ${poNos[0]}`,
+          `ผู้อนุมัติ: ${data.managerName || '-'}`,
+          '',
+          data.approvalUrl,
+          '',
+          'กรุณาเปิดลิงก์เพื่อตรวจสอบรายละเอียด และกดอนุมัติ/ปฏิเสธ'
+        ].join('\n');
 
     let copied = false;
     try {
