@@ -2540,10 +2540,6 @@ function previewPOFromNo(poNo) {
   const po = allPOs.find(p => p.poNo === poNo);
   if (!po) return;
 
-  // 🔗 หากมีไฟล์ PDF อยู่ใน Google Drive แล้ว ให้เปิดลิงก์ PDF โดยตรงแทน เพื่อให้ได้ไฟล์ที่ตรงกับบอท
-  openApprovedPOPdf(po);
-  return;
-
   showLoading('กำลังเตรียมตัวอย่างเอกสาร...');
   google.script.run
     .withSuccessHandler(result => {
@@ -2662,7 +2658,7 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
     <div class="po-light-bg" style="background:#f0f4f8;border-bottom:1px solid #ccc;padding:5px 14px;font-size:11px;font-weight:700;color:#1a3a5c;text-align:center;letter-spacing:0.5px">
       กรุณาจำหน่ายสินค้าตามรายการดังต่อไปนี้
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:11px">
+    <table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed">
       <thead>
         <tr class="po-thead-row" style="background:#1a3a5c;color:#fff">
           <th class="po-th" style="padding:6px 8px;width:32px;text-align:center;font-weight:600">ลำดับ</th>
@@ -2685,7 +2681,7 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
       return `
       <tr style="background:${globalIdx % 2 === 0 ? '#fff' : '#f9fafb'};border-bottom:1px solid #eee">
         <td style="padding:5px 8px;text-align:center;color:#aaa">${it ? globalIdx + 1 : ''}</td>
-        <td style="padding:5px 8px">${it ? it.partName : ''}</td>
+        <td style="padding:5px 8px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35">${it ? it.partName : ''}</td>
         <td style="padding:5px 8px;text-align:center">${it ? it.qty : ''}</td>
         <td style="padding:5px 8px;text-align:center;color:#888">${it ? (it.unit || '') : ''}</td>
         <td style="padding:5px 8px;text-align:right">${it ? fmtNum(it.pricePerUnit) : ''}</td>
@@ -2865,16 +2861,6 @@ function printPO() {
   if (!printedNos.length) {
     const poNo = document.getElementById('editPONo').value;
     if (poNo && poNo !== 'PREVIEW' && poNo !== 'BULK') printedNos = [poNo];
-  }
-
-  // 🔗 หากเป็นการพิมพ์แบบใบเดียว และมีไฟล์ PDF อยู่ใน Drive ให้เปิดลิงก์ PDF โดยตรง
-  if (printedNos.length === 1) {
-    const targetPoNo = printedNos[0];
-    const po = allPOs.find(p => p.poNo === targetPoNo);
-    if (po) {
-      openApprovedPOPdf(po, { closeModal: true });
-      return;
-    }
   }
 
   // แสดง loading

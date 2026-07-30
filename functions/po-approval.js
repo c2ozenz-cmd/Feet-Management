@@ -113,6 +113,29 @@ function isApprovalReadyStatus(status) {
   return ['รออนุมัติ', 'ออกPO'].includes(status || '');
 }
 
+async function refreshPendingPreviewPdfs(token, request, poNos) {
+  if (request.status !== 'pending' || request.previewPdfVersion === 'wrap-v6') return request;
+
+  const requesterPdfUrls = { ...(request.requesterPdfUrls || {}) };
+  for (const poNo of poNos) {
+    try {
+      const pdfUrl = await generatePOPdf(poNo);
+      if (pdfUrl) requesterPdfUrls[poNo] = pdfUrl;
+    } catch (err) {
+      console.warn(`Refresh approval preview PDF failed for ${poNo}:`, err.message);
+    }
+  }
+
+  const updatedRequest = {
+    ...request,
+    requesterPdfUrl: requesterPdfUrls[poNos[0]] || request.requesterPdfUrl || '',
+    requesterPdfUrls,
+    previewPdfVersion: 'wrap-v6'
+  };
+  await saveRequest(token, updatedRequest);
+  return updatedRequest;
+}
+
 async function generatePOPdf(poNo) {
   const res = await generatePdfFunction.handler({
     httpMethod: 'GET',
@@ -126,8 +149,9 @@ async function generatePOPdf(poNo) {
 }
 
 async function handleGet(token) {
-  const request = await loadRequest(token);
+  let request = await loadRequest(token);
   const poNos = getRequestPoNos(request);
+  request = await refreshPendingPreviewPdfs(token, request, poNos);
   const pos = await Promise.all(poNos.map(async poNo => {
     const { po, items } = await loadPO(poNo);
     return publicPO(po, items, request);

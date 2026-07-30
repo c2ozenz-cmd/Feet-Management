@@ -50,6 +50,7 @@ exports.handler = async (event, context) => {
       .from('pdf-orders')
       .upload(fileName, pdfBuffer, {
         contentType: 'application/pdf',
+        cacheControl: '0',
         upsert: true
       });
 
@@ -61,14 +62,15 @@ exports.handler = async (event, context) => {
     const { data: { publicUrl } } = supabase.storage
       .from('pdf-orders')
       .getPublicUrl(fileName);
+    const versionedUrl = `${publicUrl}?v=${Date.now()}`;
 
     // 8. Update DB
-    await supabase.from('purchase_orders').update({ pdf_url: publicUrl }).eq('po_no', poNo);
+    await supabase.from('purchase_orders').update({ pdf_url: versionedUrl }).eq('po_no', poNo);
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ success: true, pdfUrl: publicUrl })
+      body: JSON.stringify({ success: true, pdfUrl: versionedUrl })
     };
 
   } catch (err) {
@@ -163,8 +165,8 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
         approverSigBuffer = await fetchImageBuffer(approverProf?.signature_url, 'approver signature');
       }
 
-      const rowsFirstPage = 15;
-      const rowsOtherPage = 17;
+      const rowsFirstPage = 8;
+      const rowsOtherPage = 12;
       const itemChunks = [];
       if (items.length > 0) itemChunks.push(items.slice(0, rowsFirstPage));
       let nextIndex = rowsFirstPage;
@@ -307,6 +309,46 @@ function drawText(doc, text, x, y, width, options = {}) {
     });
 }
 
+function wrapTextByWidth(doc, text, width, options = {}) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return [];
+  doc.font(options.bold ? 'Sarabun-Bold' : 'Sarabun').fontSize(options.size || 8);
+  const chunks = [];
+  value.split(' ').forEach((word, index) => {
+    if (index > 0) chunks.push(' ');
+    chunks.push(...Array.from(word));
+  });
+
+  const lines = [];
+  let line = '';
+  chunks.forEach(chunk => {
+    const next = line + chunk;
+    if (line && doc.widthOfString(next) > width) {
+      lines.push(line.trimEnd());
+      line = chunk.trimStart();
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line.trimEnd());
+  return lines;
+}
+
+function drawWrappedText(doc, text, x, y, width, options = {}) {
+  const size = options.size || 8;
+  const lineHeight = options.lineHeight || size + 1.4;
+  const maxLines = options.maxLines || 3;
+  const lines = wrapTextByWidth(doc, text, width, options).slice(0, maxLines);
+  lines.forEach((line, index) => {
+    drawText(doc, line, x, y + (index * lineHeight), width, {
+      ...options,
+      height: undefined,
+      ellipsis: false
+    });
+  });
+  return lines;
+}
+
 function drawOldStyleHeader(doc, po, settings, logoBuffer, pageNum, totalPages) {
   const blue = '#10263d';
   const left = 28;
@@ -384,7 +426,9 @@ function drawOldStyleTable(doc, pageItems, startIndex, y, rowTarget) {
   const left = 28;
   const width = 539;
   const blue = '#10263d';
-  const rowH = 16;
+  const minRowH = 24;
+  const itemNameWidth = 230;
+  const itemNameText = { size: 7.8, lineHeight: 11, maxLines: 4 };
   doc.rect(left, y, width, 19).fill('#f0f4f8');
   drawText(doc, 'กรุณาจำหน่ายสินค้าตามรายการดังต่อไปนี้', left, y + 4, width, { bold: true, size: 8, color: blue, align: 'center' });
   y += 19;
@@ -402,24 +446,31 @@ function drawOldStyleTable(doc, pageItems, startIndex, y, rowTarget) {
   cols.forEach(([x, w, t, align]) => drawText(doc, t, x + 4, y + 5, w - 8, { bold: true, size: 7.5, color: '#ffffff', align }));
   y += 20;
 
+  const tableBodyTop = y;
+  let tableBodyHeight = 0;
   const rows = [...pageItems];
   while (rows.length < Math.max(rowTarget, 5)) rows.push(null);
   rows.forEach((item, i) => {
+    const itemNameLines = item ? wrapTextByWidth(doc, item.part_name || '', itemNameWidth, itemNameText).slice(0, itemNameText.maxLines) : [];
+    const rowH = item ? Math.max(minRowH, 12 + (itemNameLines.length * itemNameText.lineHeight)) : minRowH;
     const bg = (startIndex + i) % 2 === 0 ? '#ffffff' : '#f9fafb';
     doc.rect(left, y, width, rowH).fill(bg);
     if (item) {
-      drawText(doc, String(startIndex + i + 1), left, y + 3, 32, { size: 7.5, color: '#777777', align: 'center' });
-      drawText(doc, item.part_name || '', left + 38, y + 3, 230, { size: 7.5, height: 10, ellipsis: true });
-      drawText(doc, String(item.qty || ''), left + 270, y + 3, 48, { size: 7.5, align: 'center' });
-      drawText(doc, item.unit || '', left + 318, y + 3, 45, { size: 7.5, color: '#777777', align: 'center' });
-      drawText(doc, formatMoney(item.price_per_unit), left + 363, y + 3, 72, { size: 7.5, align: 'right' });
-      drawText(doc, parseFloat(item.discount) > 0 ? formatMoney(item.discount) : '-', left + 435, y + 3, 54, { size: 7.5, color: '#c05050', align: 'right' });
-      drawText(doc, formatMoney(item.amount), left + 489, y + 3, 47, { size: 7.5, bold: true, align: 'right' });
+      drawText(doc, String(startIndex + i + 1), left, y + 8, 32, { size: 7.5, color: '#777777', align: 'center' });
+      itemNameLines.forEach((line, lineIndex) => {
+        drawText(doc, line, left + 38, y + 7 + (lineIndex * itemNameText.lineHeight), itemNameWidth, { size: itemNameText.size });
+      });
+      drawText(doc, String(item.qty || ''), left + 270, y + 8, 48, { size: 7.5, align: 'center' });
+      drawText(doc, item.unit || '', left + 318, y + 8, 45, { size: 7.5, color: '#777777', align: 'center' });
+      drawText(doc, formatMoney(item.price_per_unit), left + 363, y + 8, 72, { size: 7.5, align: 'right' });
+      drawText(doc, parseFloat(item.discount) > 0 ? formatMoney(item.discount) : '-', left + 435, y + 8, 54, { size: 7.5, color: '#c05050', align: 'right' });
+      drawText(doc, formatMoney(item.amount), left + 489, y + 8, 47, { size: 7.5, bold: true, align: 'right' });
     }
     doc.strokeColor('#eeeeee').lineWidth(0.4).moveTo(left, y + rowH).lineTo(left + width, y + rowH).stroke();
     y += rowH;
+    tableBodyHeight += rowH;
   });
-  doc.strokeColor(blue).lineWidth(0.8).rect(left, y - rows.length * rowH - 20, width, rows.length * rowH + 20).stroke();
+  doc.strokeColor(blue).lineWidth(0.8).rect(left, tableBodyTop - 20, width, tableBodyHeight + 20).stroke();
   return y;
 }
 

@@ -261,7 +261,11 @@
         pdfLink.classList.add('hidden');
         return;
       }
-      const fitUrl = `${url}${url.includes('#') ? '&' : '#'}toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+      const [baseUrl, hash = ''] = url.split('#');
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      const cacheBustUrl = `${baseUrl}${separator}viewerTs=${Date.now()}`;
+      const pdfOptions = hash ? `${hash}&toolbar=0&navpanes=0&scrollbar=0&view=FitH` : 'toolbar=0&navpanes=0&scrollbar=0&view=FitH';
+      const fitUrl = `${cacheBustUrl}#${pdfOptions}`;
       pdfFrame.src = fitUrl;
       pdfLink.href = url;
       pdfLink.classList.remove('hidden');
