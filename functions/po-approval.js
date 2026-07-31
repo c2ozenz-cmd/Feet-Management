@@ -114,7 +114,7 @@ function isApprovalReadyStatus(status) {
 }
 
 async function refreshPendingPreviewPdfs(token, request, poNos) {
-  if (request.status !== 'pending' || request.previewPdfVersion === 'wrap-v6') return request;
+  if (request.status !== 'pending' || request.previewPdfVersion === 'wrap-v7') return request;
 
   const requesterPdfUrls = { ...(request.requesterPdfUrls || {}) };
   for (const poNo of poNos) {
@@ -130,7 +130,7 @@ async function refreshPendingPreviewPdfs(token, request, poNos) {
     ...request,
     requesterPdfUrl: requesterPdfUrls[poNos[0]] || request.requesterPdfUrl || '',
     requesterPdfUrls,
-    previewPdfVersion: 'wrap-v6'
+    previewPdfVersion: 'wrap-v7'
   };
   await saveRequest(token, updatedRequest);
   return updatedRequest;

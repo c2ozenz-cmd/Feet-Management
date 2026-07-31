@@ -302,7 +302,7 @@ async function handleTextMessage(event) {
         approvedPo = freshPo || { ...po, pdf_url: pdfRes.pdfUrl };
       }
     }
-    await replyLineMessage(event.replyToken, buildPOApprovedStatusText(approvedPo));
+    await replyLineFlex(event.replyToken, buildPOApprovedStatusFlex(approvedPo));
     return;
   }
 }
@@ -336,7 +336,7 @@ function normalizePersonName(name) {
 function buildPOApprovedStatusText(po) {
   const poNo = po.po_no || '';
   const approverName = po.approved_by || '—';
-  const approvedAt = po.approved_at ? formatDateTH(new Date(po.approved_at)) : formatDateTH(new Date());
+  const approvedAt = formatDateOnlyTH(po.approved_at || new Date());
   const lines = [
     `✅ อนุมัติ PO ${poNo}`,
     `ผู้อนุมัติ: ${approverName}`,
@@ -345,6 +345,72 @@ function buildPOApprovedStatusText(po) {
   ];
   if (po.pdf_url) lines.push(`PDF: ${po.pdf_url}`);
   return lines.join('\n');
+}
+
+function buildPOApprovedStatusFlex(po) {
+  const poNo = po.po_no || '';
+  const pdfUrl = po.pdf_url || po.pdfUrl || '';
+  const approvedAt = formatDateOnlyTH(po.approved_at || new Date());
+  const contents = {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '12px',
+      spacing: 'md',
+      contents: [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          backgroundColor: '#1E3A5F',
+          cornerRadius: '8px',
+          paddingAll: '10px',
+          contents: [
+            { type: 'text', text: '🚌', size: 'sm', flex: 0 },
+            { type: 'text', text: po.plate || 'Stock', size: 'lg', weight: 'bold', color: '#FFFFFF', margin: 'sm' }
+          ]
+        },
+        {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#F0FDF4',
+          cornerRadius: '8px',
+          paddingAll: '12px',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: '📋 รายละเอียดการอนุมัติ', size: 'xs', weight: 'bold', color: '#065F46' },
+            detailRow('📄 เลขที่ PO', '', poNo),
+            detailRow('👤 ผู้อนุมัติ', '', po.approved_by || '—'),
+            detailRow('📅 วันที่', '', approvedAt)
+          ]
+        }
+      ]
+    }
+  };
+
+  if (pdfUrl) {
+    contents.footer = {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '12px',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          color: '#10B981',
+          action: { type: 'uri', label: '📄 ดูใบสั่งซื้อ PDF', uri: pdfUrl }
+        }
+      ]
+    };
+  }
+
+  return {
+    type: 'flex',
+    altText: `✅ อนุมัติ PO ${poNo}`,
+    contents
+  };
 }
 
 async function getNameByLineId(lineUserId) {

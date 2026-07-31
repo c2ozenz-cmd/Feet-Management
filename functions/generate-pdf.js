@@ -165,18 +165,6 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
         approverSigBuffer = await fetchImageBuffer(approverProf?.signature_url, 'approver signature');
       }
 
-      const rowsFirstPage = 8;
-      const rowsOtherPage = 12;
-      const itemChunks = [];
-      if (items.length > 0) itemChunks.push(items.slice(0, rowsFirstPage));
-      let nextIndex = rowsFirstPage;
-      while (nextIndex < items.length) {
-        itemChunks.push(items.slice(nextIndex, nextIndex + rowsOtherPage));
-        nextIndex += rowsOtherPage;
-      }
-      if (!itemChunks.length) itemChunks.push([]);
-      const totalPages = itemChunks.length;
-
       const subtotal = items.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0);
       let vat = 0;
       let grandTotal = subtotal;
@@ -187,6 +175,9 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
         vat = subtotal - (subtotal / 1.07);
       }
       const beforeVat = po.vat_type === 'inclusive' ? subtotal / 1.07 : subtotal;
+
+      const itemChunks = paginatePOItems(doc, items || []);
+      const totalPages = itemChunks.length;
 
       let runningIndex = 0;
       for (let pageIndex = 0; pageIndex < totalPages; pageIndex++) {
@@ -200,7 +191,7 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
 
         drawOldStyleHeader(doc, po, settings, logoBuffer, pageNum, totalPages);
         let y = isFirstPage ? drawOldStyleSupplier(doc, po) : 133;
-        y = drawOldStyleTable(doc, pageItems, startIndex, y, isFirstPage ? rowsFirstPage : rowsOtherPage);
+        y = drawOldStyleTable(doc, pageItems, startIndex, y);
 
         if (isLastPage) {
           drawOldStyleNotesAndTotals(doc, po, items, beforeVat, vat, grandTotal, y + 4);
@@ -349,6 +340,68 @@ function drawWrappedText(doc, text, x, y, width, options = {}) {
   return lines;
 }
 
+const PO_TABLE = {
+  left: 28,
+  width: 539,
+  headerHeight: 39,
+  firstStartY: 201,
+  nextStartY: 133,
+  lastPageMaxY: 615,
+  normalPageMaxY: 792,
+  minRowHeight: 24,
+  itemNameWidth: 230,
+  itemNameText: { size: 7.8, lineHeight: 11, maxLines: 4 }
+};
+
+function measurePORowHeight(doc, item) {
+  if (!item) return PO_TABLE.minRowHeight;
+  const lines = wrapTextByWidth(doc, item.part_name || '', PO_TABLE.itemNameWidth, PO_TABLE.itemNameText)
+    .slice(0, PO_TABLE.itemNameText.maxLines);
+  return Math.max(PO_TABLE.minRowHeight, 12 + (Math.max(1, lines.length) * PO_TABLE.itemNameText.lineHeight));
+}
+
+function pageStartY(pageIndex) {
+  return pageIndex === 0 ? PO_TABLE.firstStartY : PO_TABLE.nextStartY;
+}
+
+function rowsHeight(doc, rows) {
+  return (rows || []).reduce((sum, item) => sum + measurePORowHeight(doc, item), 0);
+}
+
+function canFitRowsOnPage(doc, rows, pageIndex, isLastPage) {
+  const startY = pageStartY(pageIndex);
+  const maxY = isLastPage ? PO_TABLE.lastPageMaxY : PO_TABLE.normalPageMaxY;
+  return startY + PO_TABLE.headerHeight + rowsHeight(doc, rows) <= maxY;
+}
+
+function paginatePOItems(doc, items) {
+  const source = (items && items.length) ? items : [];
+  if (!source.length) return [[]];
+
+  const pages = [];
+  let index = 0;
+  while (index < source.length) {
+    const pageIndex = pages.length;
+    const remaining = source.slice(index);
+    if (canFitRowsOnPage(doc, remaining, pageIndex, true)) {
+      pages.push(remaining);
+      break;
+    }
+
+    const rows = [];
+    while (index < source.length) {
+      const candidate = [...rows, source[index]];
+      if (rows.length && !canFitRowsOnPage(doc, candidate, pageIndex, false)) break;
+      rows.push(source[index]);
+      index++;
+    }
+    if (!rows.length) rows.push(source[index++]);
+    pages.push(rows);
+  }
+
+  return pages.filter((page, index) => page.length || index === 0);
+}
+
 function drawOldStyleHeader(doc, po, settings, logoBuffer, pageNum, totalPages) {
   const blue = '#10263d';
   const left = 28;
@@ -422,13 +475,13 @@ function drawFieldLine(doc, label, value, x, y, width, valueHeight = 12) {
   doc.strokeColor('#dddddd').lineWidth(0.4).moveTo(x + 76, y + valueHeight).lineTo(x + width, y + valueHeight).stroke();
 }
 
-function drawOldStyleTable(doc, pageItems, startIndex, y, rowTarget) {
-  const left = 28;
-  const width = 539;
+function drawOldStyleTable(doc, pageItems, startIndex, y) {
+  const left = PO_TABLE.left;
+  const width = PO_TABLE.width;
   const blue = '#10263d';
-  const minRowH = 24;
-  const itemNameWidth = 230;
-  const itemNameText = { size: 7.8, lineHeight: 11, maxLines: 4 };
+  const minRowH = PO_TABLE.minRowHeight;
+  const itemNameWidth = PO_TABLE.itemNameWidth;
+  const itemNameText = PO_TABLE.itemNameText;
   doc.rect(left, y, width, 19).fill('#f0f4f8');
   drawText(doc, 'กรุณาจำหน่ายสินค้าตามรายการดังต่อไปนี้', left, y + 4, width, { bold: true, size: 8, color: blue, align: 'center' });
   y += 19;
@@ -449,7 +502,7 @@ function drawOldStyleTable(doc, pageItems, startIndex, y, rowTarget) {
   const tableBodyTop = y;
   let tableBodyHeight = 0;
   const rows = [...pageItems];
-  while (rows.length < Math.max(rowTarget, 5)) rows.push(null);
+  if (!rows.length) rows.push(null, null, null);
   rows.forEach((item, i) => {
     const itemNameLines = item ? wrapTextByWidth(doc, item.part_name || '', itemNameWidth, itemNameText).slice(0, itemNameText.maxLines) : [];
     const rowH = item ? Math.max(minRowH, 12 + (itemNameLines.length * itemNameText.lineHeight)) : minRowH;
