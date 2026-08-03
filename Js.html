@@ -298,14 +298,6 @@ function initApp() {
   setTimeout(() => initTomSelects(), 0);
 }
 
-window.addEventListener('focus', () => {
-  maybeRefreshPOsOnReturn();
-});
-
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) maybeRefreshPOsOnReturn();
-});
-
 function hydrateCurrentUserSignature() {
   if (!currentUser || currentUser.signatureUrl) return;
   google.script.run
@@ -367,8 +359,7 @@ function navigateTo(page) {
     case 'oiltemplate': loadOilTemplate(); break;
     case 'linelog': loadLineLog(); break;
   }
-  if (page === 'po') startPOAutoRefresh();
-  else stopPOAutoRefresh();
+  stopPOAutoRefresh();
   setTimeout(() => initTomSelects(pageEl || document), 0);
 }
 
@@ -1286,9 +1277,6 @@ function isPOListVisible() {
 
 function startPOAutoRefresh() {
   stopPOAutoRefresh();
-  poAutoRefreshTimer = setInterval(() => {
-    refreshPOsSilently();
-  }, 15000);
 }
 
 function stopPOAutoRefresh() {
@@ -1299,23 +1287,28 @@ function stopPOAutoRefresh() {
 }
 
 function maybeRefreshPOsOnReturn() {
-  if (!isPOListVisible()) return;
-  if (Date.now() - lastPOAutoRefreshAt < 3000) return;
-  refreshPOsSilently();
 }
 
 function refreshPOsSilently() {
-  if (document.hidden || !isPOListVisible() || poRefreshInFlight) return;
+  manualRefreshPOs({ silent: true });
+}
+
+function manualRefreshPOs(options = {}) {
+  if (!isPOListVisible() || poRefreshInFlight) return;
+  const silent = options.silent === true;
   poRefreshInFlight = true;
+  if (!silent) showToast('info', 'กำลังรีเฟรชรายการ PO...');
   google.script.run
     .withSuccessHandler(pos => {
       poRefreshInFlight = false;
       lastPOAutoRefreshAt = Date.now();
       allPOs = pos || [];
       filterPOs();
+      if (!silent) showToast('success', 'รีเฟรชรายการ PO แล้ว');
     })
-    .withFailureHandler(() => {
+    .withFailureHandler(err => {
       poRefreshInFlight = false;
+      if (!silent) showToast('error', err?.message || 'รีเฟรชรายการ PO ไม่สำเร็จ');
     })
     .getPOs();
 }

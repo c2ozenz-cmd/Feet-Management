@@ -290,7 +290,13 @@ async function handleTextMessage(event) {
       await replyLineMessage(event.replyToken, `❌ ไม่พบข้อมูลใบสั่งซื้อ ${poNo} ในระบบ`);
       return;
     }
-    if (po.status !== 'อนุมัติแล้ว') {
+    const isApprovedStatus = po.status === 'อนุมัติแล้ว';
+    const isReceivedAfterApproval = po.status === 'รับของแล้ว' && (po.approved_by || po.approved_at);
+    if (!isApprovedStatus && !isReceivedAfterApproval) {
+      if (po.status === 'รับของแล้ว') {
+        await replyLineMessage(event.replyToken, `ℹ️ ${poNo} อยู่สถานะ "รับของแล้ว" แต่ยังไม่พบข้อมูลผู้อนุมัติ\nกรุณาตรวจสอบข้อมูลการอนุมัติก่อนส่งสถานะ`);
+        return;
+      }
       await replyLineMessage(event.replyToken, `ℹ️ ${poNo} ยังไม่ได้รับการอนุมัติ\nสถานะปัจจุบัน: "${po.status}"`);
       return;
     }

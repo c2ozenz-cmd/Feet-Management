@@ -5,9 +5,14 @@
       <h2 class="page-title"><i class="bi bi-file-earmark-text me-2" style="color:var(--claude-primary)"></i>ใบสั่งซื้ออะไหล่ (PO)</h2>
       <p class="page-subtitle">จัดการใบสั่งซื้ออะไหล่ทั้งหมด</p>
     </div>
-    <button class="btn btn-primary admin-only" onclick="showPOForm()">
-      <i class="bi bi-plus-lg me-1"></i>สร้าง PO ใหม่
-    </button>
+    <div class="d-flex gap-2 flex-wrap justify-content-end">
+      <button class="btn btn-outline-secondary" onclick="manualRefreshPOs()">
+        <i class="bi bi-arrow-clockwise me-1"></i>รีเฟรช
+      </button>
+      <button class="btn btn-primary admin-only" onclick="showPOForm()">
+        <i class="bi bi-plus-lg me-1"></i>สร้าง PO ใหม่
+      </button>
+    </div>
   </div>
 
   <div class="search-bar">

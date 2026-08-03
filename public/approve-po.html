@@ -40,6 +40,8 @@
       border-radius: 8px;
       padding: 14px 16px;
     }
+    .header.success { background: var(--green); }
+    .header.rejected { background: var(--red); }
     .header h1 { margin: 0; font-size: 22px; }
     .header p { margin: 4px 0 0; color: #D7E5F4; font-size: 14px; }
     .grid {
@@ -85,6 +87,22 @@
     .label { color: var(--muted); }
     .value { font-weight: 700; text-align: right; }
     .status { color: var(--muted); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+    .status.success {
+      background: #ECFDF5;
+      color: #065F46;
+      border: 1px solid #A7F3D0;
+      border-radius: 8px;
+      padding: 12px;
+      font-weight: 800;
+    }
+    .status.rejected {
+      background: #FEF2F2;
+      color: #991B1B;
+      border: 1px solid #FECACA;
+      border-radius: 8px;
+      padding: 12px;
+      font-weight: 800;
+    }
     .po-list {
       overflow: auto;
       border: 1px solid #F0E8DD;
@@ -264,6 +282,7 @@
     const pdfMobileLink = document.getElementById('pdfMobileLink');
     const approveBtn = document.getElementById('approveBtn');
     const rejectBtn = document.getElementById('rejectBtn');
+    const header = document.querySelector('.header');
 
     let currentPOs = [];
     let activePoNo = '';
@@ -405,6 +424,39 @@
       updateActionLabels();
     }
 
+    function showCompletedState(action, json) {
+      const isApprove = action === 'approve';
+      currentPOs = json.pos || (json.po ? [json.po] : currentPOs);
+      selectedPoNos = new Set(currentPOs.map(po => po.poNo));
+      const first = currentPOs[0] || json.po;
+      const count = json.count || currentPOs.length || 1;
+      const title = isApprove ? 'อนุมัติเสร็จแล้ว' : 'ปฏิเสธเสร็จแล้ว';
+      const subtitle = count > 1
+        ? `${isApprove ? 'อนุมัติ' : 'ปฏิเสธ'}ใบสั่งซื้อ ${count} ใบเรียบร้อย`
+        : `${first?.poNo || ''} ${isApprove ? 'อนุมัติเรียบร้อย' : 'ปฏิเสธเรียบร้อย'}`.trim();
+
+      actionBox.classList.add('hidden');
+      statusBox.classList.remove('rejected', 'success');
+      statusBox.classList.add(isApprove ? 'success' : 'rejected');
+      statusBox.textContent = `${title}\n${subtitle}\nผู้อนุมัติ: ${first?.approvedBy || first?.request?.managerName || '-'}`;
+
+      resultText.classList.remove('hidden', 'rejected', 'success');
+      resultText.classList.add(isApprove ? 'success' : 'rejected');
+      resultText.textContent = 'บันทึกผลเรียบร้อยแล้ว สามารถปิดหน้านี้ได้';
+
+      if (first) {
+        renderDetail(first);
+        setText('poStatus', isApprove ? 'อนุมัติแล้ว' : 'ปฏิเสธ');
+        setPdf(first);
+      }
+      header.classList.toggle('success', isApprove);
+      header.classList.toggle('rejected', !isApprove);
+      document.querySelector('.header h1').textContent = title;
+      document.getElementById('subtitle').textContent = 'บันทึกผลเรียบร้อย สามารถปิดหน้านี้ได้';
+      renderPOList();
+      updateSummary();
+    }
+
     async function loadPO() {
       if (!token) {
         statusBox.textContent = 'ไม่พบ token ในลิงก์';
@@ -442,12 +494,10 @@
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.success) throw new Error(json.message || 'ดำเนินการไม่สำเร็จ');
-        actionBox.classList.add('hidden');
-        const lines = (json.results || []).map(item => `${item.poNo}: ${item.status}`);
-        resultText.textContent = `${json.message}\n${lines.join('\n')}\nผู้อนุมัติ: ${json.po?.approvedBy || '-'}`;
-        if (json.po) setPdf(json.po);
-        await loadPO();
+        showCompletedState(action, json);
       } catch (err) {
+        resultText.classList.remove('success');
+        resultText.classList.add('rejected');
         resultText.textContent = err.message || String(err);
       } finally {
         setBusy(false);
