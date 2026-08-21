@@ -69,11 +69,21 @@
         .from('stock')
         .select('part_code')
         .like('part_code', `${prefix}%`)
-        .order('part_code', { ascending: false })
-        .limit(1);
+        .limit(10000);
       if (error) throw error;
-      const latest = (data || []).find(r => /^P\d+$/.test(String(r.part_code || '')));
-      const next = latest ? (parseInt(String(latest.part_code).slice(1), 10) || 0) + 1 : 1;
+      const usedNumbers = new Set();
+      let maxNumber = 0;
+      (data || []).forEach(row => {
+        const code = String(row.part_code || '').trim().toUpperCase();
+        if (!/^P\d+$/.test(code)) return;
+        const num = parseInt(code.slice(1), 10) || 0;
+        if (num > 0) {
+          usedNumbers.add(num);
+          maxNumber = Math.max(maxNumber, num);
+        }
+      });
+      let next = maxNumber + 1;
+      while (usedNumbers.has(next)) next++;
       return `${prefix}${String(next).padStart(4, '0')}`;
     }
 
@@ -924,18 +934,22 @@
 
     async saveStockItem(item) {
       try {
+        const isNewItem = !item.id;
         const payload = {
           part_code: item.partCode, part_name: item.partName, unit: item.unit,
           qty: parseFloat(item.qty) || 0, min_qty: parseFloat(item.minQty) || 0,
           location: item.location, note: item.note
         };
+        if (isNewItem) {
+          payload.part_code = await this._generatePartCodeValue();
+        }
         if (item.id) {
+          if (!payload.part_code) payload.part_code = await this._generatePartCodeValue();
           const { error } = await supabase.from('stock').update(payload).eq('id', item.id);
           if (error) throw error;
           this._ok({ success: true });
         } else {
           payload.id = this._makeId('STK');
-          if (!payload.part_code) payload.part_code = await this._generatePartCodeValue();
           const { data, error } = await supabase.from('stock').insert(payload).select().single();
           if (error) throw error;
           this._ok({ success: true, id: data.id, partCode: data.part_code });
@@ -1237,9 +1251,9 @@
     // ── INTEGRATIONS: LINE SENDS AND PDF TRIGGER ──
     async sendPOToLineDirect(poNo) {
       try {
-        const res = await fetch(`/.netlify/functions/line-send-po?poNo=${poNo}`, { method: 'POST' });
+        const res = await fetch(`/.netlify/functions/line-send-po-status?poNo=${poNo}`, { method: 'POST' });
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(this._responseErrorMessage(json, 'Failed to send PO to LINE'));
+        if (!res.ok) throw new Error(this._responseErrorMessage(json, 'Failed to send PO status to LINE'));
         this._ok(json);
       } catch (err) { this._err(err); }
     }
@@ -1274,14 +1288,17 @@
         const results = [];
         for (const poNo of (poNos || [])) {
           try {
-            const res = await fetch(`/.netlify/functions/line-send-po?poNo=${encodeURIComponent(poNo)}`, { method: 'POST' });
+            const res = await fetch(`/.netlify/functions/line-send-po-status?poNo=${encodeURIComponent(poNo)}`, { method: 'POST' });
             const json = await res.json().catch(() => ({}));
             results.push({ poNo, success: res.ok && json.success !== false, ...json });
           } catch (err) {
             results.push({ poNo, success: false, message: err.message });
           }
         }
-        this._ok({ success: results.every(r => r.success), results });
+        const sent = results.filter(r => r.success).length;
+        const skipped = results.filter(r => r.alreadySent).length;
+        const failed = results.length - sent - skipped;
+        this._ok({ success: results.every(r => r.success || r.alreadySent), sent, skipped, failed, results });
       } catch (err) { this._ok({ success: false, message: err.message }); }
     }
 

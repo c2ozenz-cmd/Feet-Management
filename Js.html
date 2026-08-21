@@ -1084,12 +1084,12 @@ function renderRepairParts() {
       <td data-label="ลำดับ" class="text-muted">${i + 1}</td>
       <td data-label="อะไหล่">
         <div class="input-group input-group-sm">
-          <input type="text" class="form-control" value="${p.partName || ''}" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
+          <input type="text" class="form-control repair-part-name-input" data-index="${i}" value="${p.partName || ''}" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].partName=this.value" placeholder="ชื่ออะไหล่">
           <button class="btn btn-outline-secondary" ${isCompleted ? 'disabled' : ''} onclick="openPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
         </div>
       </td>
       <td data-label="รหัส"><span class="text-muted small">${p.partCode || ''}</span></td>
-      <td data-label="จำนวน"><input type="number" class="form-control form-control-sm" value="${p.qty || 1}" min="0" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
+      <td data-label="จำนวน"><input type="number" class="form-control form-control-sm repair-part-qty-input" data-index="${i}" value="${p.qty || 1}" min="0" ${isCompleted ? 'disabled' : ''} onchange="repairPartRows[${i}].qty=parseFloat(this.value)||0"></td>
       <td data-label="">
         ${isCompleted ? '—' : `
         <button class="btn btn-sm btn-outline-danger" onclick="removeRepairPart(${i})"><i class="bi bi-trash"></i></button>
@@ -1098,9 +1098,20 @@ function renderRepairParts() {
     </tr>`).join('');
 }
 
-function saveRepair() {
+function syncRepairPartRowsFromInputs() {
+  document.querySelectorAll('#repairPartsBody .repair-part-name-input').forEach(input => {
+    const idx = parseInt(input.dataset.index, 10);
+    if (repairPartRows[idx]) repairPartRows[idx].partName = input.value.trim();
+  });
+  document.querySelectorAll('#repairPartsBody .repair-part-qty-input').forEach(input => {
+    const idx = parseInt(input.dataset.index, 10);
+    if (repairPartRows[idx]) repairPartRows[idx].qty = parseFloat(input.value) || 0;
+  });
+}
 
-  const repair = {
+function getRepairFormPayload() {
+  syncRepairPartRowsFromInputs();
+  return {
     repairNo   : document.getElementById('editRepairNo').value,
     date       : document.getElementById('repairDate').value,
     plate      : document.getElementById('repairPlate').value,
@@ -1110,12 +1121,21 @@ function saveRepair() {
     repairList : document.getElementById('repairList').value,
     repairSummary :document.getElementById('repairSummary').value,
     createdBy  : currentUser?.name || ''
-
   };
+}
+
+function validateRepairPayload(repair) {
   if (!repair.date || !repair.plate || !repair.repairList) {
     showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
-    return;
+    return false;
   }
+  return true;
+}
+
+function saveRepair() {
+
+  const repair = getRepairFormPayload();
+  if (!validateRepairPayload(repair)) return;
   showLoading('กำลังบันทึก...');
   google.script.run
     .withSuccessHandler(res => {
@@ -1173,9 +1193,10 @@ function saveRepair() {
 function changeRepairStatus(status) {
   const repairNo = document.getElementById('editRepairNo').value;
   if (!repairNo) return;
+  const repair = getRepairFormPayload();
+  if (!validateRepairPayload(repair)) return;
   if (status === 'เสร็จแล้ว') {
-  const summary =
-    document.getElementById('repairSummary').value.trim();
+    const summary = repair.repairSummary.trim();
     if (!summary) {
       showToast(
         'warning',
@@ -1185,20 +1206,33 @@ function changeRepairStatus(status) {
     }
   }
   confirmAction(`เปลี่ยนสถานะเป็น "${status}"?`, () => {
-    showLoading('กำลังอัปเดต...');
+    showLoading('กำลังบันทึกและอัปเดตสถานะ...');
     google.script.run
-      .withSuccessHandler(res => {
-        Swal.close();
-        if (res.success) {
-          showToast('success', 'อัปเดตสถานะเรียบร้อย');
-          renderRepairStepper(status);
-          document.getElementById('createPOBtn').style.display = status === 'รออะไหล่' ? '' : 'none';
-          const r = allRepairs.find(x => x.repairNo === repairNo);
-          if (r) r.status = status;
-        } else { showToast('error', res.message); }
+      .withSuccessHandler(saveRes => {
+        if (!saveRes.success) {
+          Swal.close();
+          showToast('error', saveRes.message);
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(res => {
+            Swal.close();
+            if (res.success) {
+              showToast('success', 'บันทึกข้อมูลและอัปเดตสถานะเรียบร้อย');
+              renderRepairStepper(status);
+              document.getElementById('createPOBtn').style.display = status === 'รออะไหล่' ? '' : 'none';
+              const r = allRepairs.find(x => x.repairNo === repairNo);
+              if (r) {
+                Object.assign(r, repair, { status });
+              }
+              loadRepairs();
+            } else { showToast('error', res.message); }
+          })
+          .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
+          .updateRepairStatus(repairNo, status);
       })
       .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
-      .updateRepairStatus(repairNo, status);
+      .saveRepair(repair, repairPartRows);
   });
 }
 
@@ -1467,7 +1501,7 @@ function renderPOTable(pos) {
           ${p.printedAt ? `<button class="btn btn-sm btn-outline-warning" onclick="unmarkPOAsPrinted('${p.poNo}')" title="ยกเลิกสถานะพิมพ์แล้ว"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
           ${isCurrentUserAdmin() ? `<button class="btn btn-sm btn-outline-secondary" onclick="createPOApprovalLink('${p.poNo}')" title="สร้างลิงก์ให้ผู้จัดการอนุมัติ"><i class="bi bi-link-45deg"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-outline-success" onclick="sharePOFreeToLine('${p.poNo}')" title="แชร์ฟรีผ่าน LIFF/LINE Share"><i class="bi bi-share"></i></button>` : ''}
-          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งขออนุมัติเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งสถานะเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
       </td>
@@ -1598,23 +1632,23 @@ function sendSelectedPOsToLine() {
   }
 
   Swal.fire({
-    title: 'ส่ง Line รายการที่เลือก?',
-    text: `ระบบจะส่ง Push ขออนุมัติ PO จำนวน ${orderedNos.length} ใบทีละรายการ`,
+    title: 'ส่งสถานะรายการที่เลือก?',
+    text: `ระบบจะส่งสถานะ PO จำนวน ${orderedNos.length} ใบเข้ากลุ่ม LINE ทีละรายการ`,
     icon: 'question',
     showCancelButton: true,
-    confirmButtonText: 'ส่ง Line',
+    confirmButtonText: 'ส่งสถานะ',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#06C755',
     cancelButtonColor: '#6B7280'
   }).then(r => {
     if (!r.isConfirmed) return;
 
-    showLoading(`กำลังส่ง Line 0/${orderedNos.length}...`);
+    showLoading(`กำลังส่งสถานะ 0/${orderedNos.length}...`);
     google.script.run
       .withSuccessHandler(res => {
         Swal.close();
         if (!res || !res.success) {
-          showToast('error', res?.message || 'ส่ง Line ไม่สำเร็จ');
+          showToast('error', res?.message || 'ส่งสถานะไม่สำเร็จ');
           return;
         }
 
@@ -1632,7 +1666,7 @@ function sendSelectedPOsToLine() {
 
         Swal.fire({
           icon: failed ? 'warning' : 'success',
-          title: failed ? 'ส่งบางรายการไม่สำเร็จ' : 'ส่ง Line เรียบร้อย',
+          title: failed ? 'ส่งบางรายการไม่สำเร็จ' : 'ส่งสถานะเรียบร้อย',
           html: `<div class="text-start">
                    <div>ส่งสำเร็จ: <b>${sent}</b></div>
                    <div>ข้าม/เคยส่งแล้ว: <b>${skipped}</b></div>
@@ -3897,7 +3931,8 @@ const COMPANY_KEYS = [
 
 const SYSTEM_SETTING_PREFIXES = [
   'linesent_repair:',
-  'pending_report:'
+  'pending_report:',
+  'po_approval:'
 ];
 
 function isSystemSettingKey(key) {
@@ -5277,23 +5312,23 @@ function promptSendToLine(type, id) {
 
 function sendPOToLineDirect(poNo) {
   Swal.fire({
-    title: 'ส่งขออนุมัติเข้า Line?',
-    text: `ต้องการส่งขออนุมัติใบสั่งซื้อ ${poNo} เข้ากลุ่ม LINE หรือไม่?`,
+    title: 'ส่งสถานะเข้า Line?',
+    text: `ต้องการส่งสถานะใบสั่งซื้อ ${poNo} เข้ากลุ่ม LINE หรือไม่?`,
     icon: 'question',
     showCancelButton: true,
-    confirmButtonText: '📲 ส่ง Line (Push)',
+    confirmButtonText: '📲 ส่งสถานะ',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#3B82F6',
     cancelButtonColor: '#6B7280'
   }).then(r => {
     if (!r.isConfirmed) return;
     
-    showLoading('กำลังส่ง Line...');
+    showLoading('กำลังส่งสถานะ...');
     google.script.run
       .withSuccessHandler(res => {
         Swal.close();
         if (res.success) {
-          showToast('success', 'ส่ง Line ขออนุมัติเรียบร้อย');
+          showToast('success', 'ส่งสถานะเรียบร้อย');
         } else if (res.alreadySent) {
           const sentDate = res.sentAt
             ? new Date(res.sentAt).toLocaleString('th-TH')
@@ -5303,24 +5338,24 @@ function sendPOToLineDirect(poNo) {
             icon: 'warning',
             title: 'เคยส่งไปแล้ว',
             html: `<div style="font-size:14px">
-                    <b>${poNo}</b> ถูกส่ง Line ไปแล้วเมื่อ<br>
+                    <b>${poNo}</b> ถูกส่งสถานะไปแล้วเมื่อ<br>
                     <span style="color:#d97706">${sentDate}</span><br><br>
                     ต้องการส่งซ้ำอีกครั้งหรือไม่?
                   </div>`,
             showCancelButton: true,
-            confirmButtonText: '📲 ส่งซ้ำ',
+            confirmButtonText: '📲 ส่งสถานะซ้ำ',
             cancelButtonText: 'ยกเลิก',
             confirmButtonColor: '#d97706',
             cancelButtonColor: '#6B7280'
           }).then(r2 => {
             if (!r2.isConfirmed) return;
             
-            showLoading('กำลังส่ง Line ซ้ำ...');
+            showLoading('กำลังส่งสถานะซ้ำ...');
             google.script.run
               .withSuccessHandler(res2 => {
                 Swal.close();
                 if (res2.success) {
-                  showToast('success', 'ส่ง Line ขออนุมัติซ้ำเรียบร้อย');
+                  showToast('success', 'ส่งสถานะซ้ำเรียบร้อย');
                 } else {
                   showToast('error', res2.message || 'ส่งไม่สำเร็จ');
                 }
@@ -5332,7 +5367,7 @@ function sendPOToLineDirect(poNo) {
               .forceSendPOToLine(poNo);
           });
         } else {
-          showToast('error', res.message || 'ส่งขออนุมัติไม่สำเร็จ');
+          showToast('error', res.message || 'ส่งสถานะไม่สำเร็จ');
         }
       })
       .withFailureHandler(err => {

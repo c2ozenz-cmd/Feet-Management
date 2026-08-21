@@ -1,7 +1,9 @@
 const { createClient } = require('@supabase/supabase-js');
+const fetch = require('node-fetch');
 const generatePdfFunction = require('./generate-pdf');
 
 let supabase;
+const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 function initSupabase() {
   if (!supabase) {
     supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -21,6 +23,107 @@ function formatMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
+}
+
+function formatDateOnlyTH(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('th-TH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+}
+
+function detailRow(icon, label, value) {
+  return {
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      { type: 'text', text: icon, size: 'xs', flex: 0 },
+      { type: 'text', text: label || ' ', size: 'xs', color: '#6B7280', flex: 3 },
+      { type: 'text', text: String(value || '-'), size: 'xs', color: '#111827', align: 'end', wrap: true, flex: 5, weight: 'bold' }
+    ]
+  };
+}
+
+function buildPOApprovedStatusFlex(po) {
+  const poNo = po.po_no || po.poNo || '';
+  const pdfUrl = po.pdf_url || po.pdfUrl || '';
+  const approvedAt = formatDateOnlyTH(po.approved_at || po.approvedAt || new Date());
+  const contents = {
+    type: 'bubble',
+    size: 'kilo',
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '12px',
+      spacing: 'md',
+      contents: [
+        {
+          type: 'box',
+          layout: 'horizontal',
+          backgroundColor: '#1E3A5F',
+          cornerRadius: '8px',
+          paddingAll: '10px',
+          contents: [
+            { type: 'text', text: '🚌', size: 'sm', flex: 0 },
+            { type: 'text', text: po.plate || 'Stock', size: 'lg', weight: 'bold', color: '#FFFFFF', margin: 'sm' }
+          ]
+        },
+        {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#F0FDF4',
+          cornerRadius: '8px',
+          paddingAll: '12px',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: '📋 รายละเอียดการอนุมัติ', size: 'xs', weight: 'bold', color: '#065F46' },
+            detailRow('📄 เลขที่ PO', '', poNo),
+            detailRow('👤 ผู้อนุมัติ', '', po.approved_by || po.approvedBy || '—'),
+            detailRow('📅 วันที่', '', approvedAt)
+          ]
+        }
+      ]
+    }
+  };
+
+  if (pdfUrl) {
+    contents.footer = {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '12px',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          color: '#10B981',
+          action: { type: 'uri', label: '📄 ดูใบสั่งซื้อ PDF', uri: pdfUrl }
+        }
+      ]
+    };
+  }
+
+  return {
+    type: 'flex',
+    altText: `✅ อนุมัติ PO ${poNo}`,
+    contents
+  };
+}
+
+async function logLine(stage, detail) {
+  try {
+    await supabase.from('line_logs').insert({
+      stage,
+      detail: JSON.stringify(detail)
+    });
+  } catch (err) {
+    console.error('LINE log insert failed:', err);
+  }
 }
 
 function publicPO(po, items, request) {
@@ -148,6 +251,89 @@ async function generatePOPdf(poNo) {
   return body.pdfUrl || '';
 }
 
+async function getLineGroupIdPO() {
+  const { data } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'LINE_GROUP_ID_PO')
+    .maybeSingle();
+  return data?.value || '';
+}
+
+async function pushApprovedPOStatuses(pos) {
+  const safePOs = (pos || []).filter(Boolean);
+  if (!safePOs.length) return [];
+
+  if (!LINE_CHANNEL_ACCESS_TOKEN) {
+    const results = safePOs.map(po => ({
+      poNo: po.po_no || po.poNo || '',
+      success: false,
+      message: 'LINE_CHANNEL_ACCESS_TOKEN is not configured'
+    }));
+    await logLine('po_approval_auto_push_config_missing', { results });
+    return results;
+  }
+
+  const groupId = await getLineGroupIdPO();
+  if (!groupId) {
+    const results = safePOs.map(po => ({
+      poNo: po.po_no || po.poNo || '',
+      success: false,
+      message: 'LINE_GROUP_ID_PO is not configured'
+    }));
+    await logLine('po_approval_auto_push_group_missing', { results });
+    return results;
+  }
+
+  const messages = safePOs.map(buildPOApprovedStatusFlex);
+  const results = [];
+  for (let i = 0; i < messages.length; i += 5) {
+    const chunk = messages.slice(i, i + 5);
+    const chunkPOs = safePOs.slice(i, i + 5);
+    try {
+      const res = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+        },
+        body: JSON.stringify({ to: groupId, messages: chunk }),
+        timeout: 15000
+      });
+      const responseBody = await res.text();
+      chunkPOs.forEach(po => {
+        results.push({
+          poNo: po.po_no || po.poNo || '',
+          success: res.ok,
+          code: res.status,
+          message: res.ok ? 'sent' : responseBody
+        });
+      });
+      await logLine(res.ok ? 'po_approval_auto_push_success' : 'po_approval_auto_push_failed', {
+        groupId,
+        poNos: chunkPOs.map(po => po.po_no || po.poNo || ''),
+        code: res.status,
+        responseBody
+      });
+    } catch (err) {
+      chunkPOs.forEach(po => {
+        results.push({
+          poNo: po.po_no || po.poNo || '',
+          success: false,
+          message: err.message
+        });
+      });
+      await logLine('po_approval_auto_push_error', {
+        groupId,
+        poNos: chunkPOs.map(po => po.po_no || po.poNo || ''),
+        error: err.message
+      });
+    }
+  }
+
+  return results;
+}
+
 async function handleGet(token) {
   let request = await loadRequest(token);
   const poNos = getRequestPoNos(request);
@@ -189,6 +375,7 @@ async function handlePost(token, body) {
   const now = new Date().toISOString();
   const results = [];
   const publicResults = [];
+  const approvedPOsForLine = [];
 
   for (const poNo of selectedPoNos) {
     const { po, items } = await loadPO(poNo);
@@ -214,13 +401,19 @@ async function handlePost(token, body) {
     publicUpdatedPO.pdfUrl = pdfUrl || publicUpdatedPO.pdfUrl;
     results.push({ success: true, poNo: po.po_no, pdfUrl, status: nextStatus });
     publicResults.push(publicUpdatedPO);
+    if (action === 'approve') approvedPOsForLine.push(updatedPO);
   }
+
+  const lineAutoPushResults = action === 'approve'
+    ? await pushApprovedPOStatuses(approvedPOsForLine)
+    : [];
 
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.actionBy = approverName;
   request.actionAt = now;
   request.selectedPoNos = selectedPoNos;
   request.results = results;
+  request.lineAutoPushResults = lineAutoPushResults;
   request.pdfUrl = results[0]?.pdfUrl || '';
   await saveRequest(token, request);
 
@@ -230,6 +423,7 @@ async function handlePost(token, body) {
     message: action === 'approve' ? 'อนุมัติ PO เรียบร้อย' : 'ปฏิเสธ PO เรียบร้อย',
     pdfUrl: results[0]?.pdfUrl || '',
     results,
+    lineAutoPushResults,
     po: publicResults[0],
     pos: publicResults,
     count: publicResults.length
