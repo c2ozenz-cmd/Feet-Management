@@ -212,6 +212,12 @@ function normalizeSelectedPoNos(body, allowedNos) {
   return [...new Set(selected)].filter(poNo => allowed.has(poNo));
 }
 
+function comparePONos(a, b) {
+  const aNo = String(a?.po_no || a?.poNo || a || '');
+  const bNo = String(b?.po_no || b?.poNo || b || '');
+  return aNo.localeCompare(bNo, 'en', { numeric: true, sensitivity: 'base' });
+}
+
 function isApprovalReadyStatus(status) {
   return ['รออนุมัติ', 'ออกPO'].includes(status || '');
 }
@@ -261,7 +267,7 @@ async function getLineGroupIdPO() {
 }
 
 async function pushApprovedPOStatuses(pos) {
-  const safePOs = (pos || []).filter(Boolean);
+  const safePOs = (pos || []).filter(Boolean).sort(comparePONos);
   if (!safePOs.length) return [];
 
   if (!LINE_CHANNEL_ACCESS_TOKEN) {

@@ -1613,6 +1613,10 @@ function syncPOBulkActions() {
   }
 }
 
+function comparePONos(a, b) {
+  return String(a || '').localeCompare(String(b || ''), 'en', { numeric: true, sensitivity: 'base' });
+}
+
 function getOrderedSelectedPONos() {
   const orderedNos = currentPOList
     .map(p => p.poNo)
@@ -1620,7 +1624,7 @@ function getOrderedSelectedPONos() {
   selectedPONos.forEach(poNo => {
     if (!orderedNos.includes(poNo)) orderedNos.push(poNo);
   });
-  return orderedNos;
+  return orderedNos.sort(comparePONos);
 }
 
 function sendSelectedPOsToLine() {

@@ -1286,7 +1286,9 @@
     async sendPOsToLineQueue(poNos) {
       try {
         const results = [];
-        for (const poNo of (poNos || [])) {
+        const orderedPONos = [...new Set((poNos || []).map(poNo => String(poNo || '').trim().toUpperCase()).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }));
+        for (const poNo of orderedPONos) {
           try {
             const res = await fetch(`/.netlify/functions/line-send-po-status?poNo=${encodeURIComponent(poNo)}`, { method: 'POST' });
             const json = await res.json().catch(() => ({}));
