@@ -165,16 +165,7 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
         approverSigBuffer = await fetchImageBuffer(approverProf?.signature_url, 'approver signature');
       }
 
-      const subtotal = items.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0);
-      let vat = 0;
-      let grandTotal = subtotal;
-      if (po.vat_type === 'exclusive') {
-        vat = subtotal * 0.07;
-        grandTotal = subtotal + vat;
-      } else if (po.vat_type === 'inclusive') {
-        vat = subtotal - (subtotal / 1.07);
-      }
-      const beforeVat = po.vat_type === 'inclusive' ? subtotal / 1.07 : subtotal;
+      const totals = calculatePOTotals(items, po.vat_type);
 
       const itemChunks = paginatePOItems(doc, items || []);
       const totalPages = itemChunks.length;
@@ -194,7 +185,7 @@ function createPO_PDF(po, items, settings, fontRegular, fontBold) {
         y = drawOldStyleTable(doc, pageItems, startIndex, y);
 
         if (isLastPage) {
-          drawOldStyleNotesAndTotals(doc, po, items, beforeVat, vat, grandTotal, y + 4);
+          drawOldStyleNotesAndTotals(doc, po, items, totals, y + 4);
           drawOldStyleSignatures(doc, po, approval, creatorSigBuffer, approverSigBuffer, stampBuffer, y + 108);
         }
       }
@@ -273,6 +264,49 @@ function formatDateTH(value) {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return String(value);
   return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear() + 543}`;
+}
+
+function numeric(value) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function calculatePOTotals(items, vatType = 'none') {
+  const safeItems = Array.isArray(items) ? items : [];
+  const grossSubtotal = safeItems.reduce((sum, item) => {
+    const qty = numeric(item.qty);
+    const price = numeric(item.price_per_unit ?? item.pricePerUnit);
+    const amount = numeric(item.amount);
+    const discount = numeric(item.discount);
+    const gross = qty * price;
+    return sum + (gross > 0 ? gross : amount + discount);
+  }, 0);
+  const discountTotal = safeItems.reduce((sum, item) => sum + numeric(item.discount), 0);
+  const netSubtotal = safeItems.reduce((sum, item) => {
+    const amount = numeric(item.amount);
+    if (amount !== 0) return sum + amount;
+    const qty = numeric(item.qty);
+    const price = numeric(item.price_per_unit ?? item.pricePerUnit);
+    return sum + Math.max((qty * price) - numeric(item.discount), 0);
+  }, 0);
+
+  let vat = 0;
+  let grandTotal = netSubtotal;
+  if (vatType === 'exclusive') {
+    vat = netSubtotal * 0.07;
+    grandTotal = netSubtotal + vat;
+  } else if (vatType === 'inclusive') {
+    vat = netSubtotal - (netSubtotal / 1.07);
+  }
+
+  const taxBaseDivider = vatType === 'inclusive' ? 1.07 : 1;
+  return {
+    beforeDiscount: grossSubtotal / taxBaseDivider,
+    discountTotal: discountTotal / taxBaseDivider,
+    afterDiscount: vatType === 'inclusive' ? netSubtotal / 1.07 : netSubtotal,
+    vat,
+    grandTotal
+  };
 }
 
 function fitImage(doc, buffer, x, y, width, height, options = {}) {
@@ -527,7 +561,7 @@ function drawOldStyleTable(doc, pageItems, startIndex, y) {
   return y;
 }
 
-function drawOldStyleNotesAndTotals(doc, po, items, beforeVat, vat, grandTotal, y) {
+function drawOldStyleNotesAndTotals(doc, po, items, totals, y) {
   const left = 28;
   const blue = '#10263d';
   const noted = items
@@ -555,10 +589,10 @@ function drawOldStyleNotesAndTotals(doc, po, items, beforeVat, vat, grandTotal, 
   drawText(doc, '(1) โปรดระบุเลขที่ใบสั่งซื้อบนใบส่งของทุกฉบับ\n(2) การวางบิลและรับเช็คเป็นไปตามกำหนดเวลาที่บริษัทกำหนด\n(3) ในการวางบิลให้แนบสำเนาใบสั่งซื้อกำกับด้วย', left + 12, y + 28, 300, { size: 7.5, color: '#444444', lineGap: 1 });
 
   const rows = [
-    ['มูลค่าสินค้าก่อนภาษี', formatMoney(beforeVat)],
-    ['ส่วนลดสินค้า', '0.00'],
-    ['เงินหลังหักส่วนลด', formatMoney(beforeVat)],
-    ['ภาษีมูลค่าเพิ่ม (7%)', formatMoney(vat)]
+    ['มูลค่าสินค้าก่อนภาษี', formatMoney(totals.beforeDiscount)],
+    ['ส่วนลดสินค้า', formatMoney(totals.discountTotal)],
+    ['เงินหลังหักส่วนลด', formatMoney(totals.afterDiscount)],
+    ['ภาษีมูลค่าเพิ่ม (7%)', formatMoney(totals.vat)]
   ];
   rows.forEach((r, i) => {
     const ry = y + i * 17;
@@ -568,7 +602,7 @@ function drawOldStyleNotesAndTotals(doc, po, items, beforeVat, vat, grandTotal, 
   });
   doc.rect(totalsX, y + 68, 220, 22).fill(blue);
   drawText(doc, 'จำนวนเงินทั้งสิ้น', totalsX + 8, y + 74, 110, { bold: true, size: 8, color: '#ffffff' });
-  drawText(doc, formatMoney(grandTotal), totalsX + 127, y + 74, 85, { bold: true, size: 8, color: '#ffffff', align: 'right' });
+  drawText(doc, formatMoney(totals.grandTotal), totalsX + 127, y + 74, 85, { bold: true, size: 8, color: '#ffffff', align: 'right' });
 }
 
 function drawOldStyleSignatures(doc, po, approval, creatorSigBuffer, approverSigBuffer, stampBuffer, y) {

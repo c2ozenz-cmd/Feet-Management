@@ -1500,7 +1500,7 @@ function renderPOTable(pos) {
           <button class="btn btn-sm btn-info" onclick="previewPOFromNo('${p.poNo}')" title="พิมพ์"><i class="bi bi-printer"></i></button>
           ${p.printedAt ? `<button class="btn btn-sm btn-outline-warning" onclick="unmarkPOAsPrinted('${p.poNo}')" title="ยกเลิกสถานะพิมพ์แล้ว"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
           ${isCurrentUserAdmin() ? `<button class="btn btn-sm btn-outline-secondary" onclick="createPOApprovalLink('${p.poNo}')" title="สร้างลิงก์ให้ผู้จัดการอนุมัติ"><i class="bi bi-link-45deg"></i></button>` : ''}
-          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-outline-success" onclick="sharePOFreeToLine('${p.poNo}')" title="แชร์ฟรีผ่าน LIFF/LINE Share"><i class="bi bi-share"></i></button>` : ''}
+          ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-outline-warning" onclick="rollbackPOStock('${p.poNo}')" title="ย้อนรับของและ Stock จาก PO นี้"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="sendPOToLineDirect('${p.poNo}')" title="ส่งสถานะเข้า Line (Push)"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deletePO('${p.poNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
@@ -1559,7 +1559,7 @@ function filterPOs() {
   const m = document.getElementById('poMonthFilter').value;
   
   filteredPOsList = allPOs.filter(p =>
-    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.grpRef || '').toLowerCase().includes(q)) &&
+    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.plate || '').toLowerCase().includes(q) || (p.grpRef || '').toLowerCase().includes(q)) &&
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
   );
@@ -2194,6 +2194,107 @@ function shouldAskPORollbackStock(oldStatus, newStatus) {
   return oldStatus === 'รับของแล้ว' && newStatus !== 'รับของแล้ว';
 }
 
+function rollbackPOStock(poNo) {
+  if (!isCurrentUserAdmin()) return;
+  showLoading('กำลังตรวจสอบรายการ Stock...');
+  google.script.run
+    .withSuccessHandler(preview => {
+      Swal.close();
+      if (!preview || !preview.success) {
+        showToast('error', preview?.message || 'ตรวจสอบรายการย้อน Stock ไม่สำเร็จ');
+        return;
+      }
+
+      const rows = (preview.details || []).map(item => `
+        <tr>
+          <td class="text-start">${escapeHtml(item.partName)}</td>
+          <td class="text-end fw-semibold">${fmtNum(item.qty)} ${escapeHtml(item.unit || '')}</td>
+          <td class="text-end">${fmtNum(item.currentQty)}</td>
+        </tr>
+      `).join('');
+      const previewHtml = rows
+        ? `<div class="table-responsive" style="max-height:280px;overflow:auto">
+             <table class="table table-sm align-middle mb-0">
+               <thead>
+                 <tr>
+                   <th class="text-start">รายการ</th>
+                   <th class="text-end">จำนวนย้อน</th>
+                   <th class="text-end">คงเหลือปัจจุบัน</th>
+                 </tr>
+               </thead>
+               <tbody>${rows}</tbody>
+             </table>
+           </div>`
+        : `<div class="alert alert-info mb-0">
+             PO นี้ไม่มีรายการเข้า Stock ที่ยังย้อนคืนได้ แต่ยังสามารถเปลี่ยนสถานะกลับเป็น <b>อนุมัติแล้ว</b> ได้
+           </div>`;
+
+      Swal.fire({
+        title: 'ยืนยันย้อนรับของ?',
+        html: `
+          <div class="text-start">
+            <p class="mb-2">
+              ระบบจะย้อนการรับของ PO <b>${poNo}</b><br>
+              หักคืน Stock ที่เคยเพิ่มไว้ และเปลี่ยนสถานะกลับเป็น <b>อนุมัติแล้ว</b>
+            </p>
+            ${previewHtml}
+            <div class="text-muted small mt-2">
+              หลังจากนั้นคุณสามารถกดรับของใหม่ แล้วเลือกว่าจะเพิ่มเข้า Stock หรือไม่เพิ่มได้อีกครั้ง
+            </div>
+          </div>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ยืนยันย้อนรับของ',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#F59E0B',
+        cancelButtonColor: '#6B7280'
+      }).then(result => {
+        if (!result.isConfirmed) return;
+        doRollbackPOStock(poNo);
+      });
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', err.message);
+    })
+    .getPORollbackStockPreview(poNo);
+}
+
+function doRollbackPOStock(poNo) {
+  showLoading('กำลังย้อนรับของ...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (!res || !res.success) {
+        showToast('error', res?.message || 'ย้อน Stock ไม่สำเร็จ');
+        return;
+      }
+      const p = allPOs.find(x => x.poNo === poNo);
+      if (p) p.status = res.status || 'อนุมัติแล้ว';
+      const statusEl = document.getElementById('poCurrentStatus');
+      if (statusEl && document.getElementById('editPONo')?.value === poNo) {
+        statusEl.value = res.status || 'อนุมัติแล้ว';
+        renderPOStepper(statusEl.value);
+      }
+      Swal.fire({
+        icon: 'success',
+        title: 'ย้อนรับของเรียบร้อย',
+        html: `PO <b>${poNo}</b><br>
+               ย้อน Stock แล้ว ${Number(res.rollbackCount || 0)} รายการ<br>
+               ย้อนรายการซ่อมแล้ว ${Number(res.repairRollbackCount || 0)} รายการ<br>
+               สถานะกลับเป็น <b>${escapeHtml(res.status || 'อนุมัติแล้ว')}</b>`,
+        confirmButtonColor: '#10B981'
+      });
+      loadStock();
+      loadPOs();
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', err.message);
+    })
+    .rollbackPOStockOnly(poNo);
+}
+
 function deletePO(poNo) {
   confirmAction(`ลบ PO ${poNo}?`, () => {
     showLoading('กำลังลบ...');
@@ -2589,14 +2690,52 @@ function _settingsToObj(arr) {
   return o;
 }
 
+function calcPOPrintTotals(items, vatType = 'none') {
+  const safeItems = Array.isArray(items) ? items : [];
+  const num = value => {
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const grossSubtotal = safeItems.reduce((sum, item) => {
+    const qty = num(item.qty);
+    const price = num(item.pricePerUnit ?? item.price_per_unit);
+    const amount = num(item.amount);
+    const discount = num(item.discount);
+    const gross = qty * price;
+    return sum + (gross > 0 ? gross : amount + discount);
+  }, 0);
+  const discountTotal = safeItems.reduce((sum, item) => sum + num(item.discount), 0);
+  const netSubtotal = safeItems.reduce((sum, item) => {
+    const amount = num(item.amount);
+    if (amount !== 0) return sum + amount;
+    const qty = num(item.qty);
+    const price = num(item.pricePerUnit ?? item.price_per_unit);
+    return sum + Math.max((qty * price) - num(item.discount), 0);
+  }, 0);
+
+  let vat = 0;
+  let grand = netSubtotal;
+  if (vatType === 'exclusive') {
+    vat = netSubtotal * 0.07;
+    grand = netSubtotal + vat;
+  } else if (vatType === 'inclusive') {
+    vat = netSubtotal - (netSubtotal / 1.07);
+  }
+
+  const taxBaseDivider = vatType === 'inclusive' ? 1.07 : 1;
+  return {
+    beforeDiscount: grossSubtotal / taxBaseDivider,
+    discountTotal: discountTotal / taxBaseDivider,
+    afterDiscount: vatType === 'inclusive' ? netSubtotal / 1.07 : netSubtotal,
+    vat,
+    grand
+  };
+}
+
 function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
   const s       = Array.isArray(settingsArr) ? _settingsToObj(settingsArr) : (settingsArr || {});
   const vatType = po.vatType || 'none';
-  const subtotal = items.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0);
-  let vat = 0, grand = subtotal;
-  if (vatType === 'exclusive') { vat = subtotal * 0.07; grand = subtotal + vat; }
-  else if (vatType === 'inclusive') { vat = subtotal - subtotal / 1.07; grand = subtotal; }
-  const preVat = vatType === 'inclusive' ? subtotal / 1.07 : subtotal;
+  const totals = calcPOPrintTotals(items, vatType);
 
   const logoImage = imageFallbackAttrs(s.COMPANY_LOGO || '');
   const stampImage = imageFallbackAttrs(s.COMPANY_STAMP || '');
@@ -2818,26 +2957,26 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
         <table style="width:100%;border-collapse:collapse">
           <tr style="border-bottom:1px solid #eee">
             <td style="padding:5px 12px;color:#555">มูลค่าสินค้าก่อนภาษี</td>
-            <td style="padding:5px 12px;text-align:right">${fmtNum(preVat)}</td>
+            <td style="padding:5px 12px;text-align:right">${fmtNum(totals.beforeDiscount)}</td>
           </tr>
           <tr style="border-bottom:1px solid #eee">
             <td style="padding:5px 12px;color:#555">ส่วนลดสินค้า</td>
-            <td style="padding:5px 12px;text-align:right">0.00</td>
+            <td style="padding:5px 12px;text-align:right">${fmtNum(totals.discountTotal)}</td>
           </tr>
           <tr style="border-bottom:1px solid #eee">
             <td style="padding:5px 12px;color:#555">เงินหลังหักส่วนลด</td>
-            <td style="padding:5px 12px;text-align:right">${fmtNum(preVat)}</td>
+            <td style="padding:5px 12px;text-align:right">${fmtNum(totals.afterDiscount)}</td>
           </tr>
           <tr style="border-bottom:1px solid #eee">
             <td style="padding:5px 12px;color:#555">ภาษีมูลค่าเพิ่ม (7%)</td>
             <td style="padding:5px 12px;text-align:right">
-              ${vatType !== 'none' ? fmtNum(vat) : '0.00'}
+              ${vatType !== 'none' ? fmtNum(totals.vat) : '0.00'}
             </td>
           </tr>
           <tr class="po-dark-bg" style="background:#1a3a5c">
             <td style="padding:7px 12px;color:#fff;font-weight:700">จำนวนเงินทั้งสิ้น</td>
             <td style="padding:7px 12px;text-align:right;color:#fff;font-weight:700">
-              ${fmtNum(grand)}
+              ${fmtNum(totals.grand)}
             </td>
           </tr>
         </table>

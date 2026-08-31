@@ -203,6 +203,46 @@
       return rollbackCount;
     }
 
+    async _getPORollbackStockPreview(poNo) {
+      const { data: logs, error: logsErr } = await supabase
+        .from('stock_logs')
+        .select('*')
+        .in('type', ['IN', 'ROLLBACK'])
+        .eq('ref', `PO: ${poNo}`);
+      if (logsErr) throw logsErr;
+
+      const netQtyByPart = new Map();
+      (logs || []).forEach(log => {
+        const partName = String(log.part_name || '').trim();
+        if (!partName) return;
+        const qty = parseFloat(log.qty) || 0;
+        const sign = log.type === 'ROLLBACK' ? -1 : 1;
+        netQtyByPart.set(partName, (netQtyByPart.get(partName) || 0) + (qty * sign));
+      });
+
+      const details = [];
+      for (const [partName, qty] of netQtyByPart.entries()) {
+        const rollbackQty = Math.max(0, qty);
+        if (rollbackQty <= 0) continue;
+        const { data: stockRows, error: stockErr } = await supabase
+          .from('stock')
+          .select('id, part_name, qty, unit')
+          .eq('part_name', partName)
+          .limit(1);
+        if (stockErr) throw stockErr;
+        const stock = (stockRows || [])[0] || null;
+        details.push({
+          partName,
+          qty: rollbackQty,
+          currentQty: parseFloat(stock?.qty) || 0,
+          unit: stock?.unit || '',
+          foundInStock: !!stock
+        });
+      }
+
+      return { poNo, count: details.length, details };
+    }
+
     async _rollbackPOPartsFromRepair(poNo) {
       const { data: po, error: poErr } = await supabase
         .from('purchase_orders')
@@ -901,6 +941,34 @@
           await this._rollbackPOPartsFromRepair(poNo);
         }
         this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async getPORollbackStockPreview(poNo) {
+      try {
+        const preview = await this._getPORollbackStockPreview(poNo);
+        this._ok({ success: true, ...preview });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async rollbackPOStockOnly(poNo) {
+      try {
+        const preview = await this._getPORollbackStockPreview(poNo);
+        const rollbackCount = preview.details.length ? await this._rollbackStockFromPO(poNo) : 0;
+        const repairRollbackCount = await this._rollbackPOPartsFromRepair(poNo);
+        const { error } = await supabase
+          .from('purchase_orders')
+          .update({ status: 'อนุมัติแล้ว' })
+          .eq('po_no', poNo);
+        if (error) throw error;
+        this._ok({
+          success: true,
+          poNo,
+          status: 'อนุมัติแล้ว',
+          rollbackCount,
+          repairRollbackCount,
+          details: preview.details
+        });
       } catch (err) { this._ok({ success: false, message: err.message }); }
     }
 
