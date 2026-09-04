@@ -1,7 +1,6 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { verifySessionToken, getBearerToken } = require('./auth-utils');
-const generatePdfFunction = require('./generate-pdf');
 
 let supabase;
 function initSupabase() {
@@ -108,18 +107,6 @@ exports.handler = async event => {
     for (const poNo of poNos) {
       const po = poByNo.get(poNo);
       requesterPdfUrls[poNo] = po.pdf_url || '';
-      try {
-        const pdfRes = await generatePdfFunction.handler({
-          httpMethod: 'GET',
-          queryStringParameters: { poNo }
-        }, {});
-        const pdfBody = JSON.parse(pdfRes.body || '{}');
-        if (pdfRes.statusCode >= 200 && pdfRes.statusCode < 300 && pdfBody.success !== false) {
-          requesterPdfUrls[poNo] = pdfBody.pdfUrl || requesterPdfUrls[poNo];
-        }
-      } catch (err) {
-        console.warn(`Generate requester PDF failed for ${poNo}:`, err.message);
-      }
     }
 
     const token = crypto.randomBytes(24).toString('base64url');
@@ -135,6 +122,7 @@ exports.handler = async event => {
       managerLineUserId,
       requesterPdfUrl: requesterPdfUrls[poNos[0]] || '',
       requesterPdfUrls,
+      previewPdfVersion: 'wrap-v7',
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString()
     };
