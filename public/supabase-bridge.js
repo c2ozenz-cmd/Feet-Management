@@ -480,9 +480,34 @@
     // ── USERS / PROFILES ──
     async getUsers() {
       try {
-        const { data, error } = await supabase.from('profiles').select('*');
+        const [{ data, error }, { data: permissionRows, error: permissionError }] = await Promise.all([
+          supabase.from('profiles').select('*'),
+          supabase.from('settings').select('key,value').like('key', 'user_permissions:%')
+        ]);
         if (error) throw error;
+        if (permissionError) throw permissionError;
+
+        const permissionsByUserId = new Map();
+        (permissionRows || []).forEach(row => {
+          try {
+            permissionsByUserId.set(String(row.key || '').slice('user_permissions:'.length), JSON.parse(row.value || '{}'));
+          } catch (_) {
+            // Ignore malformed legacy settings and use role-based defaults.
+          }
+        });
         const mapped = (data || []).map(p => ({
+          ...(() => {
+            const saved = permissionsByUserId.get(String(p.id)) || {};
+            const role = String(p.role || '').toLowerCase();
+            return {
+              canApproveLine: typeof saved.canApproveLine === 'boolean'
+                ? saved.canApproveLine
+                : ['admin', 'manager'].includes(role),
+              canReportRepairLine: typeof saved.canReportRepairLine === 'boolean'
+                ? saved.canReportRepairLine
+                : ['user', 'mechanic'].includes(role)
+            };
+          })(),
           id: p.id,
           username: p.username,
           name: p.name,
@@ -511,16 +536,27 @@
           payload.password = user.password;
         }
 
-        if (user.id) {
-          const { error } = await supabase.from('profiles').update(payload).eq('id', user.id);
+        let savedUserId = user.id;
+        if (savedUserId) {
+          const { error } = await supabase.from('profiles').update(payload).eq('id', savedUserId);
           if (error) throw error;
-          this._ok({ success: true });
         } else {
-          const id = 'U' + Date.now();
-          const { error } = await supabase.from('profiles').insert({ id, ...payload });
+          savedUserId = 'U' + Date.now();
+          const { error } = await supabase.from('profiles').insert({ id: savedUserId, ...payload });
           if (error) throw error;
-          this._ok({ success: true, id });
         }
+
+        const permissions = {
+          canApproveLine: user.canApproveLine === true,
+          canReportRepairLine: user.canReportRepairLine === true
+        };
+        const { error: permissionError } = await supabase.from('settings').upsert({
+          key: `user_permissions:${savedUserId}`,
+          value: JSON.stringify(permissions)
+        }, { onConflict: 'key' });
+        if (permissionError) throw permissionError;
+
+        this._ok({ success: true, id: savedUserId });
       } catch (err) { this._err(err); }
     }
 
@@ -528,6 +564,8 @@
       try {
         const { error } = await supabase.from('profiles').delete().eq('id', id);
         if (error) throw error;
+        const { error: permissionError } = await supabase.from('settings').delete().eq('key', `user_permissions:${id}`);
+        if (permissionError) throw permissionError;
         this._ok({ success: true });
       } catch (err) { this._err(err); }
     }

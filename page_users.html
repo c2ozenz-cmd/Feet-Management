@@ -17,6 +17,7 @@
           <col style="width:170px">
           <col>
           <col style="width:110px">
+          <col style="width:230px">
           <col style="width:120px">
           <col style="width:96px">
         </colgroup>
@@ -26,12 +27,13 @@
             <th>ชื่อผู้ใช้</th>
             <th>ชื่อ-สกุล</th>
             <th>บทบาท</th>
+            <th>สิทธิ์ LINE</th>
             <th>สถานะ</th>
             <th class="text-center">จัดการ</th>
           </tr>
         </thead>
         <tbody id="usersTableBody">
-          <tr><td colspan="6" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
+          <tr><td colspan="7" class="text-center text-muted py-5">กำลังโหลดข้อมูล...</td></tr>
         </tbody>
       </table>
     </div>
@@ -92,6 +94,25 @@
                 </button>
               </div>
               <div class="form-text">ให้ผู้ใช้ส่งข้อความหา Bot แล้วนำ ID ที่ได้มากรอกที่นี่</div>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label fw-semibold">สิทธิ์การทำงานผ่าน LINE</label>
+              <div class="border rounded p-3 bg-white">
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" id="userCanApproveLine">
+                  <label class="form-check-label" for="userCanApproveLine">
+                    อนุมัติงานซ่อมและใบสั่งซื้อ
+                  </label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="userCanReportRepairLine">
+                  <label class="form-check-label" for="userCanReportRepairLine">
+                    รายงานผล เปลี่ยนเป็นรออะไหล่ และปิดงานซ่อม
+                  </label>
+                </div>
+              </div>
+              <div class="form-text">Bot จะตรวจสิทธิ์นี้ก่อนทำรายการ แม้ผู้ใช้จะมองเห็นปุ่มในกลุ่ม LINE</div>
             </div>
 
             <div class="col-12">

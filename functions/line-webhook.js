@@ -60,6 +60,13 @@ async function handlePostback(event) {
 
   // 1. Technician Action (tech_done, tech_waiting, tech_report)
   if (['tech_done', 'tech_waiting', 'tech_report'].includes(action)) {
+    const canReportRepair = await isLineUserAllowed(lineUserId, 'report_repair');
+    if (!canReportRepair) {
+      await logLineWorkflow('repair_report_permission_denied', { action, id, lineUserId });
+      await replyLineMessage(replyToken, '⛔ เฉพาะผู้ที่ได้รับสิทธิ์รายงานงานซ่อมเท่านั้น\nกรุณาติดต่อผู้ดูแลระบบ');
+      return;
+    }
+
     const user = await getNameByLineId(lineUserId);
     const techName = user ? user.name : 'ช่าง';
 
@@ -84,7 +91,7 @@ async function handlePostback(event) {
   }
 
   // 2. Check Admin Permission for approval actions
-  const canApprove = await isLineUserAllowed(lineUserId, 'admin');
+  const canApprove = await isLineUserAllowed(lineUserId, 'approve');
   if (!canApprove) {
     await logLineWorkflow('approval_permission_denied', { action, type, id, lineUserId });
     await replyLineMessage(replyToken, '⛔ คุณไม่มีสิทธิ์อนุมัติรายการนี้\nกรุณาติดต่อผู้ดูแลระบบ');
@@ -436,7 +443,7 @@ async function getLineGroupId(type) {
 }
 
 async function handlePOTextDecision(replyToken, lineUserId, poNo, action) {
-  const canApprove = await isLineUserAllowed(lineUserId, 'admin');
+  const canApprove = await isLineUserAllowed(lineUserId, 'approve');
   if (!canApprove) {
     await logLineWorkflow('po_text_decision_permission_denied', { poNo, action, lineUserId });
     await replyLineMessage(replyToken, '⛔ คุณไม่มีสิทธิ์อนุมัติรายการนี้\nกรุณาติดต่อผู้ดูแลระบบ');
@@ -497,10 +504,40 @@ async function handlePOTextDecision(replyToken, lineUserId, poNo, action) {
 }
 
 async function isLineUserAllowed(lineUserId, requiredRole) {
-  const { data, error } = await supabase.from('profiles').select('role').eq('line_user_id', lineUserId).single();
-  if (error || !data) return false;
-  if (requiredRole === 'admin') return ['admin', 'manager'].includes(data.role);
-  return true;
+  if (!lineUserId) return false;
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('id,role,status')
+    .eq('line_user_id', lineUserId)
+    .single();
+  if (error || !profile || profile.status !== 'active') return false;
+
+  const { data: permissionRow } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', `user_permissions:${profile.id}`)
+    .single();
+
+  let permissions = {};
+  try {
+    permissions = JSON.parse(permissionRow?.value || '{}');
+  } catch (_) {
+    permissions = {};
+  }
+
+  const role = String(profile.role || '').trim().toLowerCase();
+  if (requiredRole === 'approve' || requiredRole === 'admin') {
+    return typeof permissions.canApproveLine === 'boolean'
+      ? permissions.canApproveLine
+      : ['admin', 'manager'].includes(role);
+  }
+  if (requiredRole === 'report_repair') {
+    return typeof permissions.canReportRepairLine === 'boolean'
+      ? permissions.canReportRepairLine
+      : ['user', 'mechanic'].includes(role);
+  }
+  return false;
 }
 
 async function updateRepairStatus(repairNo, status) {
@@ -635,6 +672,13 @@ async function clearPendingReport(lineUserId) {
 }
 
 async function handleTechReport(replyToken, lineUserId, refNo, text) {
+  const canReportRepair = await isLineUserAllowed(lineUserId, 'report_repair');
+  if (!canReportRepair) {
+    await logLineWorkflow('repair_text_report_permission_denied', { id: refNo, lineUserId });
+    await replyLineMessage(replyToken, '⛔ เฉพาะผู้ที่ได้รับสิทธิ์รายงานงานซ่อมเท่านั้น\nกรุณาติดต่อผู้ดูแลระบบ');
+    return;
+  }
+
   const user = await getNameByLineId(lineUserId);
   const techName = user ? user.name : 'ช่าง';
   

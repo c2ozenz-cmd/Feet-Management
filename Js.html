@@ -3782,7 +3782,7 @@ function loadUsers() {
     const tbody = document.getElementById('usersTableBody');
     tbody.closest('table').classList.add('table-card-mobile');
     if (!users.length) {
-      tbody.innerHTML = `<tr><td colspan="6" data-label=""><div class="empty-state"><i class="bi bi-people"></i>ยังไม่มีผู้ใช้</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-people"></i>ยังไม่มีผู้ใช้</div></td></tr>`;
       return;
     }
     tbody.innerHTML = users.map(u => `
@@ -3791,6 +3791,11 @@ function loadUsers() {
         <td data-label="ชื่อผู้ใช้" class="fw-semibold">${u.username}</td>
         <td data-label="ชื่อ-สกุล">${u.name}</td>
         <td data-label="บทบาท"><span class="badge-status ${u.role === 'admin' ? 'status-approved' : 'status-waiting-parts'}">${u.role === 'admin' ? 'Admin' : 'User'}</span></td>
+        <td data-label="สิทธิ์ LINE" class="small">
+          ${u.canApproveLine ? '<span class="badge-status status-approved me-1">อนุมัติ</span>' : ''}
+          ${u.canReportRepairLine ? '<span class="badge-status status-done">รายงานซ่อม</span>' : ''}
+          ${!u.canApproveLine && !u.canReportRepairLine ? '<span class="text-muted">ไม่มี</span>' : ''}
+        </td>
         <td data-label="สถานะ"><span class="badge-status ${u.status === 'active' ? 'status-done' : 'status-waiting-parts'}">${u.status === 'active' ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}</span></td>
         <td data-label="">
           <div class="user-actions d-flex gap-1 justify-content-center align-items-center">
@@ -3810,6 +3815,8 @@ function showUserModal(id = null) {
   document.getElementById('userName').value = '';
   setSelectValue('userRole', 'user');
   setSelectValue('userStatus', 'active');
+  document.getElementById('userCanApproveLine').checked = false;
+  document.getElementById('userCanReportRepairLine').checked = true;
   document.getElementById('userLineUserId').value = '';
   document.getElementById('userSignatureUrl').value = '';
   document.getElementById('userSignatureFile').value = '';
@@ -3828,6 +3835,8 @@ function showUserModal(id = null) {
         document.getElementById('userName').value = u.name;
         setSelectValue('userRole', u.role);
         setSelectValue('userStatus', u.status);
+        document.getElementById('userCanApproveLine').checked = u.canApproveLine === true;
+        document.getElementById('userCanReportRepairLine').checked = u.canReportRepairLine === true;
         document.getElementById('userLineUserId').value = u.lineUserId || '';
         document.getElementById('userSignatureUrl').value = u.signatureUrl || '';
         setSignaturePreview(u.signatureUrl || '');
@@ -3852,6 +3861,8 @@ async function saveUser() {
     name         : document.getElementById('userName').value,
     role         : document.getElementById('userRole').value,
     status       : document.getElementById('userStatus').value,
+    canApproveLine: document.getElementById('userCanApproveLine').checked,
+    canReportRepairLine: document.getElementById('userCanReportRepairLine').checked,
     lineUserId   : document.getElementById('userLineUserId').value.trim(),
     signatureUrl : document.getElementById('userSignatureUrl').value.trim()
   };
@@ -4075,7 +4086,8 @@ const COMPANY_KEYS = [
 const SYSTEM_SETTING_PREFIXES = [
   'linesent_repair:',
   'pending_report:',
-  'po_approval:'
+  'po_approval:',
+  'user_permissions:'
 ];
 
 function isSystemSettingKey(key) {
