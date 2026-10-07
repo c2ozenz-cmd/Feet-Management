@@ -567,8 +567,8 @@ function isRepairDoneStatus(status) {
 async function deductStockForRepair(repairNo) {
   const { data: priorLogs, error: priorErr } = await supabase
     .from('stock_logs')
-    .select('part_name, qty')
-    .eq('type', 'OUT')
+    .select('type, part_name, qty')
+    .in('type', ['OUT', 'ROLLBACK'])
     .eq('ref', `Repair: ${repairNo}`);
   if (priorErr) throw priorErr;
 
@@ -582,7 +582,9 @@ async function deductStockForRepair(repairNo) {
   (priorLogs || []).forEach(log => {
     const partName = String(log.part_name || '').trim();
     if (!partName) return;
-    deductedByPart.set(partName, (deductedByPart.get(partName) || 0) + (parseFloat(log.qty) || 0));
+    const qty = parseFloat(log.qty) || 0;
+    const sign = log.type === 'ROLLBACK' ? -1 : 1;
+    deductedByPart.set(partName, (deductedByPart.get(partName) || 0) + (qty * sign));
   });
 
   for (const part of (parts || [])) {

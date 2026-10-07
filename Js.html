@@ -933,6 +933,7 @@ function renderRepairTable(repairs) {
         <div class="d-flex gap-1 justify-content-end">
           <button class="btn btn-sm btn-outline-primary" onclick="editRepair('${r.repairNo}')" title="แก้ไข"><i class="bi bi-pencil"></i></button>
           ${r.status === 'รออะไหล่' ? `<button class="btn btn-sm btn-info" onclick="createPOFromRepairNo('${r.repairNo}','${r.plate}')" title="สร้าง PO"><i class="bi bi-file-earmark-plus"></i></button>` : ''}
+          ${r.status === 'เสร็จแล้ว' && isCurrentUserAdmin() ? `<button class="btn btn-sm btn-outline-warning" onclick="rollbackCompletedRepair('${r.repairNo}')" title="ยกเลิกปิดงาน"><i class="bi bi-arrow-counterclockwise"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm" style="border-color: #06C755; color: #06C755; background: transparent; transition: all 0.2s;" onmouseover="this.style.background='#06C755'; this.style.color='#fff';" onmouseout="this.style.background='transparent'; this.style.color='#06C755';" onclick="promptSendToLine('repair', '${r.repairNo}')" title="ส่ง/แชร์เข้า Line"><i class="bi bi-line"></i></button>` : ''}
           ${currentUser?.role === 'admin' ? `<button class="btn btn-sm btn-danger" onclick="deleteRepair('${r.repairNo}')" title="ลบ"><i class="bi bi-trash"></i></button>` : ''}
         </div>
@@ -993,6 +994,11 @@ function showRepairForm(repair = null) {
   if (saveBtn) saveBtn.style.display = isCompleted ? 'none' : '';
   const addPartBtn = document.getElementById('openPartPickerBtn');
   if (addPartBtn) addPartBtn.style.display = isCompleted ? 'none' : '';
+  const rollbackBtn = document.getElementById('rollbackCompletedRepairBtn');
+  if (rollbackBtn) rollbackBtn.style.display = isCompleted && isCurrentUserAdmin() ? '' : 'none';
+  document.querySelectorAll('#repairStatusCard button:not(#rollbackCompletedRepairBtn)').forEach(btn => {
+    btn.disabled = Boolean(isCompleted);
+  });
 
   if (repair) {
     document.getElementById('repairFormTitle').textContent = 'แก้ไขการแจ้งซ่อม';
@@ -1248,6 +1254,92 @@ function deleteRepair(repairNo) {
       .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
       .deleteRepair(repairNo);
   });
+}
+
+function rollbackCompletedRepair(repairNo = '') {
+  if (!isCurrentUserAdmin()) return;
+  const targetRepairNo = repairNo || document.getElementById('editRepairNo')?.value || '';
+  if (!targetRepairNo) return;
+
+  showLoading('กำลังตรวจสอบรายการอะไหล่...');
+  google.script.run
+    .withSuccessHandler(preview => {
+      Swal.close();
+      if (!preview?.success) {
+        showToast('error', preview?.message || 'ตรวจสอบรายการคืน Stock ไม่สำเร็จ');
+        return;
+      }
+
+      const rows = (preview.details || []).map(item => `
+        <tr>
+          <td class="text-start">${escapeHtml(item.partName || '')}</td>
+          <td class="text-end fw-semibold">${Number(item.qty || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 })}</td>
+        </tr>`).join('');
+      const stockPreview = rows
+        ? `<div class="table-responsive mt-3" style="max-height:240px">
+             <table class="table table-sm mb-0">
+               <thead><tr><th class="text-start">อะไหล่ที่จะคืน Stock</th><th class="text-end">จำนวน</th></tr></thead>
+               <tbody>${rows}</tbody>
+             </table>
+           </div>`
+        : '<div class="alert alert-light border mt-3 mb-0">งานนี้ไม่มีรายการอะไหล่ที่ต้องคืน Stock</div>';
+
+      Swal.fire({
+        title: 'ยกเลิกปิดงาน',
+        html: `
+          <div class="text-start">
+            <p class="mb-2">งาน <b>${escapeHtml(targetRepairNo)}</b> จะถูกเปิดให้แก้ไขอีกครั้ง</p>
+            <label class="form-label fw-semibold" for="repairRollbackTarget">ย้อนกลับไปสถานะ</label>
+            <select id="repairRollbackTarget" class="form-select">
+              <option value="กำลังซ่อม">กำลังซ่อม</option>
+              <option value="รออะไหล่">รออะไหล่</option>
+            </select>
+            ${stockPreview}
+          </div>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ยืนยันยกเลิกปิดงาน',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#F59E0B',
+        preConfirm: () => document.getElementById('repairRollbackTarget')?.value || 'กำลังซ่อม'
+      }).then(result => {
+        if (!result.isConfirmed) return;
+        doRollbackCompletedRepair(targetRepairNo, result.value);
+      });
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', err.message);
+    })
+    .getRepairRollbackPreview(targetRepairNo);
+}
+
+function doRollbackCompletedRepair(repairNo, targetStatus) {
+  showLoading('กำลังคืน Stock และเปิดงานซ่อม...');
+  google.script.run
+    .withSuccessHandler(res => {
+      Swal.close();
+      if (!res?.success) {
+        showToast('error', res?.message || 'ยกเลิกปิดงานไม่สำเร็จ');
+        return;
+      }
+
+      Swal.fire({
+        icon: 'success',
+        title: 'ยกเลิกปิดงานแล้ว',
+        html: `งาน <b>${escapeHtml(repairNo)}</b><br>สถานะกลับเป็น <b>${escapeHtml(res.status || targetStatus)}</b><br>คืน Stock แล้ว ${Number(res.restoredCount || 0)} รายการ`,
+        confirmButtonColor: '#10B981'
+      }).then(() => {
+        showRepairList();
+        loadRepairs();
+        loadStock();
+      });
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', err.message);
+    })
+    .rollbackCompletedRepair(repairNo, targetStatus);
 }
 
 function createPOFromRepair() {
@@ -2296,16 +2388,111 @@ function doRollbackPOStock(poNo) {
 }
 
 function deletePO(poNo) {
-  confirmAction(`ลบ PO ${poNo}?`, () => {
-    showLoading('กำลังลบ...');
+  Swal.fire({
+    icon: 'warning',
+    title: `ย้าย ${escapeHtml(poNo)} ไปถังขยะ?`,
+    text: 'สามารถกู้คืน PO และรายการสินค้าได้ภายหลัง',
+    showCancelButton: true,
+    confirmButtonText: 'ย้ายไปถังขยะ',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#DC2626'
+  }).then(result => {
+    if (!result.isConfirmed) return;
+    showLoading('กำลังย้ายไปถังขยะ...');
     google.script.run
       .withSuccessHandler(res => {
         Swal.close();
-        if (res.success) { showToast('success', 'ลบเรียบร้อย'); loadPOs(); }
-        else { showToast('error', res.message); }
+        if (res?.success) {
+          selectedPONos.delete(poNo);
+          showToast('success', `ย้าย ${poNo} ไปถังขยะแล้ว`);
+          loadPOs();
+        } else {
+          showToast('error', res?.message || 'ย้าย PO ไปถังขยะไม่สำเร็จ');
+        }
       })
       .withFailureHandler(e => { Swal.close(); showToast('error', e.message); })
       .deletePO(poNo);
+  });
+}
+
+function showPOTrash() {
+  if (!isCurrentUserAdmin()) return;
+  showLoading('กำลังโหลดถังขยะ PO...');
+  google.script.run
+    .withSuccessHandler(items => {
+      Swal.close();
+      const trash = Array.isArray(items) ? items : [];
+      if (!trash.length) {
+        Swal.fire({ icon: 'info', title: 'ถังขยะว่าง', text: 'ยังไม่มี PO ที่ถูกลบ', confirmButtonColor: '#3D4F6B' });
+        return;
+      }
+
+      const rows = trash.map(item => {
+        const deletedAt = item.deletedAt
+          ? new Date(item.deletedAt).toLocaleString('th-TH')
+          : '-';
+        return `
+          <tr>
+            <td class="text-start fw-semibold">${escapeHtml(item.poNo || '')}</td>
+            <td class="text-start">${escapeHtml(item.shopName || '-')}</td>
+            <td class="text-center">${Number(item.itemCount || 0)}</td>
+            <td class="text-start small">${escapeHtml(item.deletedBy || '-')}<br><span class="text-muted">${escapeHtml(deletedAt)}</span></td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-success" onclick="restorePOFromTrash('${escapeHtml(item.poNo || '')}')">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>กู้คืน
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+
+      Swal.fire({
+        title: 'ถังขยะ PO',
+        width: 900,
+        html: `
+          <div class="table-responsive text-start" style="max-height:480px">
+            <table class="table table-hover align-middle mb-0">
+              <thead><tr><th>เลข PO</th><th>ร้านค้า</th><th class="text-center">สินค้า</th><th>ผู้ลบ / เวลา</th><th></th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`,
+        showConfirmButton: false,
+        showCloseButton: true
+      });
+    })
+    .withFailureHandler(err => {
+      Swal.close();
+      showToast('error', err.message);
+    })
+    .getPOTrash();
+}
+
+function restorePOFromTrash(poNo) {
+  Swal.fire({
+    icon: 'question',
+    title: `กู้คืน ${escapeHtml(poNo)}?`,
+    text: 'ระบบจะนำ PO และรายการสินค้ากลับสู่รายการหลัก',
+    showCancelButton: true,
+    confirmButtonText: 'กู้คืน',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#10B981'
+  }).then(result => {
+    if (!result.isConfirmed) return;
+    showLoading('กำลังกู้คืน PO...');
+    google.script.run
+      .withSuccessHandler(res => {
+        Swal.close();
+        if (!res?.success) {
+          showToast('error', res?.message || 'กู้คืน PO ไม่สำเร็จ');
+          return;
+        }
+        showToast(res.warning ? 'warning' : 'success', res.warning || `กู้คืน ${poNo} เรียบร้อย`);
+        loadPOs();
+      })
+      .withFailureHandler(err => {
+        Swal.close();
+        showToast('error', err.message);
+      })
+      .restorePOFromTrash(poNo);
   });
 }
 
@@ -3610,6 +3797,7 @@ function loadStockLog() {
         'IN'         : { label: 'รับเข้า',         cls: 'status-done',       icon: 'box-arrow-in-down' },
         'OUT'        : { label: 'ตัดออก(ซ่อม)',    cls: 'status-inprogress', icon: 'box-arrow-up'      },
         'OUT-MANUAL' : { label: 'ตัดออก(manual)',  cls: 'status-waiting',    icon: 'scissors'          },
+        'ROLLBACK'   : { label: 'ย้อน Stock',      cls: 'status-approved',   icon: 'arrow-counterclockwise' },
         'CANCEL'     : { label: 'ยกเลิก',          cls: 'status-approved',   icon: 'arrow-counterclockwise' },
         'LINE_REG'   : { label: 'ลงทะเบียน Line', cls: 'status-approved',   icon: 'line'              }
       };
@@ -3726,6 +3914,12 @@ function viewPartHistory(partName) {
           typeBadge = '<span class="badge bg-secondary-light text-secondary"><i class="bi bi-arrow-counterclockwise me-1"></i> ยกเลิกเบิก</span>';
           rowColor = 'background-color: rgba(107, 114, 128, 0.04)';
           details = `ยกเลิกการเบิกออกเดิม (ข้อมูลอ้างอิง: <i>${l.ref}</i>)`;
+        } else if (l.type === 'ROLLBACK') {
+          typeBadge = '<span class="badge bg-secondary-light text-secondary"><i class="bi bi-arrow-counterclockwise me-1"></i> ย้อน Stock</span>';
+          rowColor = 'background-color: rgba(107, 114, 128, 0.04)';
+          details = String(l.ref || '').startsWith('Repair:')
+            ? `คืน Stock จากการยกเลิกปิดงาน <b>${l.ref}</b>`
+            : `ย้อนรายการรับเข้า <b>${l.ref || '—'}</b>`;
         } else {
           typeBadge = `<span class="badge bg-secondary-light text-secondary">${l.type}</span>`;
           details = l.ref || '—';
@@ -4087,6 +4281,7 @@ const SYSTEM_SETTING_PREFIXES = [
   'linesent_repair:',
   'pending_report:',
   'po_approval:',
+  'po_trash:',
   'user_permissions:'
 ];
 

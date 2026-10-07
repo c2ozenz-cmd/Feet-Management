@@ -334,8 +334,8 @@
     async _deductStockForRepair(repairNo) {
       const { data: priorLogs, error: priorErr } = await supabase
         .from('stock_logs')
-        .select('part_name, qty')
-        .eq('type', 'OUT')
+        .select('type, part_name, qty')
+        .in('type', ['OUT', 'ROLLBACK'])
         .eq('ref', `Repair: ${repairNo}`);
       if (priorErr) throw priorErr;
 
@@ -349,7 +349,9 @@
       (priorLogs || []).forEach(log => {
         const partName = String(log.part_name || '').trim();
         if (!partName) return;
-        deductedByPart.set(partName, (deductedByPart.get(partName) || 0) + (parseFloat(log.qty) || 0));
+        const qty = parseFloat(log.qty) || 0;
+        const sign = log.type === 'ROLLBACK' ? -1 : 1;
+        deductedByPart.set(partName, (deductedByPart.get(partName) || 0) + (qty * sign));
       });
 
       for (const part of (parts || [])) {
@@ -380,30 +382,80 @@
       const { data: logs, error: logsErr } = await supabase
         .from('stock_logs')
         .select('*')
-        .eq('type', 'OUT')
+        .in('type', ['OUT', 'ROLLBACK'])
         .eq('ref', `Repair: ${repairNo}`);
       if (logsErr) throw logsErr;
 
+      const netQtyByPart = new Map();
+      (logs || []).forEach(log => {
+        const partName = String(log.part_name || '').trim();
+        if (!partName) return;
+        const qty = parseFloat(log.qty) || 0;
+        const sign = log.type === 'ROLLBACK' ? -1 : 1;
+        netQtyByPart.set(partName, (netQtyByPart.get(partName) || 0) + (qty * sign));
+      });
+
       let restoredCount = 0;
-      for (const log of (logs || [])) {
+      for (const [partName, netQty] of netQtyByPart.entries()) {
+        const restoreQty = Math.max(0, netQty);
+        if (restoreQty <= 0) continue;
         const { data: stockRows, error: stockErr } = await supabase
           .from('stock')
           .select('*')
-          .eq('part_name', log.part_name)
+          .eq('part_name', partName)
           .limit(1);
         if (stockErr) throw stockErr;
         const stock = (stockRows || [])[0];
-        if (stock) {
-          const { error: updateErr } = await supabase
-            .from('stock')
-            .update({ qty: (parseFloat(stock.qty) || 0) + (parseFloat(log.qty) || 0) })
-            .eq('id', stock.id);
-          if (updateErr) throw updateErr;
-          restoredCount++;
+        if (!stock) throw new Error(`ไม่พบอะไหล่ "${partName}" ใน Stock จึงไม่สามารถยกเลิกปิดงานได้`);
+
+        const { error: updateErr } = await supabase
+          .from('stock')
+          .update({ qty: (parseFloat(stock.qty) || 0) + restoreQty })
+          .eq('id', stock.id);
+        if (updateErr) throw updateErr;
+        try {
+          await this._logStockTransaction('ROLLBACK', partName, restoreQty, `Repair: ${repairNo}`);
+        } catch (logErr) {
+          await supabase.from('stock').update({ qty: parseFloat(stock.qty) || 0 }).eq('id', stock.id);
+          throw logErr;
         }
-        await supabase.from('stock_logs').delete().eq('id', log.id);
+        restoredCount++;
       }
       return restoredCount;
+    }
+
+    async _getRepairRollbackPreview(repairNo) {
+      const { data: repair, error: repairErr } = await supabase
+        .from('repairs')
+        .select('repair_no,status')
+        .eq('repair_no', repairNo)
+        .single();
+      if (repairErr) throw repairErr;
+      if (!repair || repair.status !== 'เสร็จแล้ว') {
+        throw new Error(`${repairNo} ไม่ได้อยู่ในสถานะเสร็จแล้ว`);
+      }
+
+      const { data: logs, error: logsErr } = await supabase
+        .from('stock_logs')
+        .select('type,part_name,qty')
+        .in('type', ['OUT', 'ROLLBACK'])
+        .eq('ref', `Repair: ${repairNo}`);
+      if (logsErr) throw logsErr;
+
+      const netQtyByPart = new Map();
+      (logs || []).forEach(log => {
+        const partName = String(log.part_name || '').trim();
+        if (!partName) return;
+        const qty = parseFloat(log.qty) || 0;
+        const sign = log.type === 'ROLLBACK' ? -1 : 1;
+        netQtyByPart.set(partName, (netQtyByPart.get(partName) || 0) + (qty * sign));
+      });
+
+      return {
+        repairNo,
+        details: Array.from(netQtyByPart, ([partName, qty]) => ({ partName, qty: Math.max(0, qty) }))
+          .filter(item => item.qty > 0)
+      };
     }
 
     // ── AUTH / LOGIN ──
@@ -777,6 +829,37 @@
       } catch (err) { this._ok({ success: false, message: err.message }); }
     }
 
+    async getRepairRollbackPreview(repairNo) {
+      try {
+        if (window.currentUser?.role !== 'admin') throw new Error('เฉพาะ Admin เท่านั้นที่ยกเลิกปิดงานได้');
+        const preview = await this._getRepairRollbackPreview(repairNo);
+        this._ok({ success: true, ...preview });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async rollbackCompletedRepair(repairNo, targetStatus) {
+      try {
+        if (window.currentUser?.role !== 'admin') throw new Error('เฉพาะ Admin เท่านั้นที่ยกเลิกปิดงานได้');
+        if (!['กำลังซ่อม', 'รออะไหล่'].includes(targetStatus)) throw new Error('สถานะปลายทางไม่ถูกต้อง');
+
+        await this._getRepairRollbackPreview(repairNo);
+        const restoredCount = await this._restoreStockForRepair(repairNo);
+        const { data: updatedRepair, error } = await supabase
+          .from('repairs')
+          .update({ status: targetStatus })
+          .eq('repair_no', repairNo)
+          .eq('status', 'เสร็จแล้ว')
+          .select('repair_no')
+          .maybeSingle();
+        if (error || !updatedRepair) {
+          await this._deductStockForRepair(repairNo);
+          throw error || new Error('สถานะงานถูกเปลี่ยนโดยผู้ใช้อื่น กรุณาโหลดข้อมูลใหม่');
+        }
+
+        this._ok({ success: true, repairNo, status: targetStatus, restoredCount });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
     async deleteRepair(repairNo) {
       try {
         const { error } = await supabase.from('repairs').delete().eq('repair_no', repairNo);
@@ -947,10 +1030,131 @@
 
     async deletePO(poNo) {
       try {
+        if (window.currentUser?.role !== 'admin') throw new Error('เฉพาะ Admin เท่านั้นที่ลบ PO ได้');
+        const [poRes, itemsRes] = await Promise.all([
+          supabase.from('purchase_orders').select('*').eq('po_no', poNo).single(),
+          supabase.from('po_items').select('*').eq('po_no', poNo).order('id')
+        ]);
+        if (poRes.error || !poRes.data) throw new Error(`ไม่พบ PO ${poNo}`);
+        if (itemsRes.error) throw itemsRes.error;
+        if (poRes.data.status === 'รับของแล้ว') {
+          throw new Error('PO นี้รับของแล้ว กรุณาย้อนรับของและ Stock ก่อนย้ายไปถังขยะ');
+        }
+
+        const trashKey = `po_trash:${poNo}`;
+        const snapshot = {
+          version: 1,
+          po: poRes.data,
+          items: itemsRes.data || [],
+          deletedAt: new Date().toISOString(),
+          deletedBy: window.currentUser?.name || window.currentUser?.username || ''
+        };
+        const { error: backupError } = await supabase.from('settings').upsert({
+          key: trashKey,
+          value: JSON.stringify(snapshot)
+        }, { onConflict: 'key' });
+        if (backupError) throw backupError;
+
         const { error } = await supabase.from('purchase_orders').delete().eq('po_no', poNo);
-        if (error) throw error;
+        if (error) {
+          await supabase.from('settings').delete().eq('key', trashKey);
+          throw error;
+        }
         this._ok({ success: true });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
+    }
+
+    async getPOTrash() {
+      try {
+        if (window.currentUser?.role !== 'admin') throw new Error('เฉพาะ Admin เท่านั้นที่เปิดถังขยะ PO ได้');
+        const { data, error } = await supabase
+          .from('settings')
+          .select('key,value,updated_at')
+          .like('key', 'po_trash:%')
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+
+        const items = (data || []).map(row => {
+          try {
+            const snapshot = JSON.parse(row.value || '{}');
+            return {
+              trashKey: row.key,
+              poNo: snapshot.po?.po_no || String(row.key || '').slice('po_trash:'.length),
+              shopName: snapshot.po?.shop_name || '',
+              status: snapshot.po?.status || '',
+              itemCount: Array.isArray(snapshot.items) ? snapshot.items.length : 0,
+              deletedAt: snapshot.deletedAt || row.updated_at || '',
+              deletedBy: snapshot.deletedBy || ''
+            };
+          } catch (_) {
+            return null;
+          }
+        }).filter(Boolean);
+
+        // A completed restore must not remain visible if only the trash cleanup failed.
+        const poNos = items.map(item => item.poNo).filter(Boolean);
+        let visibleItems = items;
+        if (poNos.length) {
+          const { data: activePOs, error: activeError } = await supabase
+            .from('purchase_orders')
+            .select('po_no')
+            .in('po_no', poNos);
+          if (activeError) throw activeError;
+          const activeSet = new Set((activePOs || []).map(row => row.po_no));
+          visibleItems = items.filter(item => !activeSet.has(item.poNo));
+
+          const staleKeys = items.filter(item => activeSet.has(item.poNo)).map(item => item.trashKey);
+          if (staleKeys.length) await supabase.from('settings').delete().in('key', staleKeys);
+        }
+
+        this._ok(visibleItems.map(({ trashKey, ...item }) => item));
       } catch (err) { this._err(err); }
+    }
+
+    async restorePOFromTrash(poNo) {
+      try {
+        if (window.currentUser?.role !== 'admin') throw new Error('เฉพาะ Admin เท่านั้นที่กู้คืน PO ได้');
+        const trashKey = `po_trash:${poNo}`;
+        const { data: trashRow, error: trashError } = await supabase
+          .from('settings')
+          .select('value')
+          .eq('key', trashKey)
+          .single();
+        if (trashError || !trashRow?.value) throw new Error(`ไม่พบ ${poNo} ในถังขยะ`);
+
+        const snapshot = JSON.parse(trashRow.value);
+        if (!snapshot.po || snapshot.po.po_no !== poNo) throw new Error('ข้อมูลสำรอง PO ไม่สมบูรณ์');
+        const { data: existing, error: existingError } = await supabase
+          .from('purchase_orders')
+          .select('po_no')
+          .eq('po_no', poNo)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (existing) throw new Error(`${poNo} มีอยู่ในรายการหลักแล้ว`);
+
+        const { error: poError } = await supabase.from('purchase_orders').insert(snapshot.po);
+        if (poError) throw poError;
+        try {
+          const restoredItems = (snapshot.items || []).map(item => {
+            const { id, ...payload } = item;
+            return { ...payload, po_no: poNo };
+          });
+          if (restoredItems.length) {
+            const { error: itemsError } = await supabase.from('po_items').insert(restoredItems);
+            if (itemsError) throw itemsError;
+          }
+        } catch (itemsError) {
+          await supabase.from('purchase_orders').delete().eq('po_no', poNo);
+          throw itemsError;
+        }
+
+        const { error: clearError } = await supabase.from('settings').delete().eq('key', trashKey);
+        this._ok({
+          success: true,
+          poNo,
+          warning: clearError ? 'กู้คืนแล้ว แต่ระบบจะล้างสำเนาในถังขยะให้อัตโนมัติเมื่อเปิดครั้งถัดไป' : ''
+        });
+      } catch (err) { this._ok({ success: false, message: err.message }); }
     }
 
     async changePOStatusDirect(poNo, status) {

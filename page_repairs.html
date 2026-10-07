@@ -202,6 +202,9 @@
         <button class="btn btn-sm btn-warning" onclick="changeRepairStatus('กำลังซ่อม')"><i class="bi bi-gear me-1"></i>กำลังซ่อม</button>
         <button class="btn btn-sm btn-secondary" onclick="changeRepairStatus('รออะไหล่')"><i class="bi bi-box me-1"></i>รออะไหล่</button>
         <button class="btn btn-sm btn-success" onclick="changeRepairStatus('เสร็จแล้ว')"><i class="bi bi-check-circle me-1"></i>เสร็จแล้ว</button>
+        <button class="btn btn-sm btn-outline-warning" onclick="rollbackCompletedRepair()" id="rollbackCompletedRepairBtn" style="display:none">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>ยกเลิกปิดงาน
+        </button>
         <button class="btn btn-sm btn-info" onclick="createPOFromRepair()" id="createPOBtn" style="display:none">
           <i class="bi bi-file-earmark-plus me-1"></i>สร้าง PO
         </button>
