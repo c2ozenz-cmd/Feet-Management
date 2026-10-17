@@ -10,3 +10,6 @@
 [dev]
   port = 8080
   functionsPort = 3001
+
+[functions."po-notify-recover"]
+  schedule = "*/5 * * * *"

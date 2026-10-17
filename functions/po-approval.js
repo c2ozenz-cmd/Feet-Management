@@ -1,9 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
-const fetch = require('node-fetch');
 const generatePdfFunction = require('./generate-pdf');
+const { createQueue } = require('./lib/po-notifications');
 
 let supabase;
-const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 function initSupabase() {
   if (!supabase) {
     supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -173,7 +172,7 @@ async function loadRequest(token) {
     .single();
   if (error || !data?.value) throw Object.assign(new Error('ลิงก์อนุมัติไม่ถูกต้องหรือหมดอายุ'), { statusCode: 404 });
   const request = JSON.parse(data.value);
-  if (request.expiresAt && Date.now() > new Date(request.expiresAt).getTime()) {
+  if (request.status === 'pending' && request.expiresAt && Date.now() > new Date(request.expiresAt).getTime()) {
     request.status = 'expired';
   }
   return request;
@@ -257,89 +256,6 @@ async function generatePOPdf(poNo) {
   return body.pdfUrl || '';
 }
 
-async function getLineGroupIdPO() {
-  const { data } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'LINE_GROUP_ID_PO')
-    .maybeSingle();
-  return data?.value || '';
-}
-
-async function pushApprovedPOStatuses(pos) {
-  const safePOs = (pos || []).filter(Boolean).sort(comparePONos);
-  if (!safePOs.length) return [];
-
-  if (!LINE_CHANNEL_ACCESS_TOKEN) {
-    const results = safePOs.map(po => ({
-      poNo: po.po_no || po.poNo || '',
-      success: false,
-      message: 'LINE_CHANNEL_ACCESS_TOKEN is not configured'
-    }));
-    await logLine('po_approval_auto_push_config_missing', { results });
-    return results;
-  }
-
-  const groupId = await getLineGroupIdPO();
-  if (!groupId) {
-    const results = safePOs.map(po => ({
-      poNo: po.po_no || po.poNo || '',
-      success: false,
-      message: 'LINE_GROUP_ID_PO is not configured'
-    }));
-    await logLine('po_approval_auto_push_group_missing', { results });
-    return results;
-  }
-
-  const messages = safePOs.map(buildPOApprovedStatusFlex);
-  const results = [];
-  for (let i = 0; i < messages.length; i += 5) {
-    const chunk = messages.slice(i, i + 5);
-    const chunkPOs = safePOs.slice(i, i + 5);
-    try {
-      const res = await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
-        },
-        body: JSON.stringify({ to: groupId, messages: chunk }),
-        timeout: 15000
-      });
-      const responseBody = await res.text();
-      chunkPOs.forEach(po => {
-        results.push({
-          poNo: po.po_no || po.poNo || '',
-          success: res.ok,
-          code: res.status,
-          message: res.ok ? 'sent' : responseBody
-        });
-      });
-      await logLine(res.ok ? 'po_approval_auto_push_success' : 'po_approval_auto_push_failed', {
-        groupId,
-        poNos: chunkPOs.map(po => po.po_no || po.poNo || ''),
-        code: res.status,
-        responseBody
-      });
-    } catch (err) {
-      chunkPOs.forEach(po => {
-        results.push({
-          poNo: po.po_no || po.poNo || '',
-          success: false,
-          message: err.message
-        });
-      });
-      await logLine('po_approval_auto_push_error', {
-        groupId,
-        poNos: chunkPOs.map(po => po.po_no || po.poNo || ''),
-        error: err.message
-      });
-    }
-  }
-
-  return results;
-}
-
 async function handleGet(token) {
   let request = await loadRequest(token);
   const poNos = getRequestPoNos(request);
@@ -381,38 +297,53 @@ async function handlePost(token, body) {
   const now = new Date().toISOString();
   const results = [];
   const publicResults = [];
-  const approvedPOsForLine = [];
-
-  for (const poNo of selectedPoNos) {
-    const { po, items } = await loadPO(poNo);
+  const loaded = await Promise.all(selectedPoNos.sort(comparePONos).map(loadPO));
+  for (const { po } of loaded) {
     if (!isApprovalReadyStatus(po.status)) {
       return json(409, { success: false, message: `PO ${po.po_no} สถานะปัจจุบัน: ${po.status || '-'}` });
     }
     if (normalizeName(po.created_by) && normalizeName(po.created_by) === normalizeName(approverName)) {
       return json(403, { success: false, message: `ผู้ขออนุมัติไม่สามารถอนุมัติ PO ${po.po_no} ของตัวเองได้` });
     }
-    let pdfUrl = po.pdf_url || '';
-    const nextStatus = action === 'approve' ? 'อนุมัติแล้ว' : 'ปฏิเสธ';
-    const { error } = await supabase.from('purchase_orders').update({
-      status: nextStatus,
-      approved_by: approverName,
-      approved_at: now
-    }).eq('po_no', po.po_no);
-    if (error) throw error;
-    if (action === 'approve') {
-      pdfUrl = await generatePOPdf(po.po_no);
-    }
+  }
+  // Claim this link before changing rows; concurrent clicks cannot enqueue a second job.
+  const requestKey = `po_approval:${token}`;
+  const { data: latest, error: latestError } = await supabase.from('settings').select('value').eq('key', requestKey).single();
+  if (latestError) throw latestError;
+  if (JSON.parse(latest.value).status !== 'pending') return json(409, { success: false, message: 'คำขอนี้กำลังดำเนินการหรืออนุมัติแล้ว' });
+  const processing = { ...request, status: 'processing', actionBy: approverName, actionAt: now, selectedPoNos };
+  const { data: claimed, error: claimError } = await supabase.from('settings').update({ value: JSON.stringify(processing) })
+    .eq('key', requestKey).eq('value', latest.value).select('key');
+  if (claimError) throw claimError;
+  if (!claimed?.length) return json(409, { success: false, message: 'คำขอนี้กำลังดำเนินการ' });
+
+  const queue = createQueue(supabase);
+  let job;
+  try {
+    if (action === 'approve') job = await queue.enqueue({ poNos: selectedPoNos, approvedAt: now, approver: approverName, approvalToken: token });
+  } catch (error) {
+    await supabase.from('settings').update({ value: latest.value }).eq('key', requestKey).eq('value', JSON.stringify(processing));
+    throw error;
+  }
+  const nextStatus = action === 'approve' ? 'อนุมัติแล้ว' : 'ปฏิเสธ';
+  const { data: updatedRows, error: updateError } = await supabase.from('purchase_orders').update({
+    status: nextStatus, approved_by: approverName, approved_at: now
+  }).in('po_no', selectedPoNos).in('status', ['รออนุมัติ', 'ออกPO']).select('po_no');
+  if (updateError) throw updateError;
+  if (updatedRows.length !== selectedPoNos.length) throw new Error('สถานะ PO บางใบเปลี่ยนระหว่างดำเนินการ กรุณาตรวจสอบรายการ');
+
+  request.status = action === 'approve' ? 'approved' : 'rejected';
+  request.notificationJobId = job?.id || '';
+  for (const { po, items } of loaded) {
+    const pdfUrl = po.pdf_url || '';
     const updatedPO = { ...po, status: nextStatus, approved_by: approverName, approved_at: now, pdf_url: pdfUrl };
     const publicUpdatedPO = publicPO(updatedPO, items, request);
     publicUpdatedPO.pdfUrl = pdfUrl || publicUpdatedPO.pdfUrl;
     results.push({ success: true, poNo: po.po_no, pdfUrl, status: nextStatus });
     publicResults.push(publicUpdatedPO);
-    if (action === 'approve') approvedPOsForLine.push(updatedPO);
   }
 
-  const lineAutoPushResults = action === 'approve'
-    ? await pushApprovedPOStatuses(approvedPOsForLine)
-    : [];
+  const lineAutoPushResults = [];
 
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.actionBy = approverName;
@@ -422,6 +353,14 @@ async function handlePost(token, body) {
   request.lineAutoPushResults = lineAutoPushResults;
   request.pdfUrl = results[0]?.pdfUrl || '';
   await saveRequest(token, request);
+  let notificationWarning = '';
+  if (job) {
+    try { await queue.activate(job.id); await queue.dispatch(job.id); }
+    catch (err) {
+      notificationWarning = 'อนุมัติแล้ว งาน PDF และ LINE อยู่ในคิวรอดำเนินการ';
+      await logLine('po_queue_dispatch_deferred', { jobId: job.id, error: err.message });
+    }
+  }
 
   return json(200, {
     success: true,
@@ -430,6 +369,8 @@ async function handlePost(token, body) {
     pdfUrl: results[0]?.pdfUrl || '',
     results,
     lineAutoPushResults,
+    notificationQueued: !!job,
+    notificationWarning,
     po: publicResults[0],
     pos: publicResults,
     count: publicResults.length
@@ -451,3 +392,4 @@ exports.handler = async event => {
     return json(err.statusCode || 500, { success: false, message: err.message || 'ดำเนินการอนุมัติไม่สำเร็จ' });
   }
 };
+exports.buildPOApprovedStatusFlex = buildPOApprovedStatusFlex;

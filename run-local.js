@@ -89,13 +89,28 @@ async function handleNetlifyFunction(req, res, pathname, queryStringParameters) 
     delete require.cache[require.resolve(functionPath)];
     const mod = require(functionPath);
     const body = await readBody(req);
-    const result = await mod.handler({
+    if (mod.config?.schedule) {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, message: 'Scheduled functions run through the scheduler' }));
+      return;
+    }
+    const event = {
       httpMethod: req.method,
       path: pathname,
       queryStringParameters,
       headers: req.headers,
       body
-    });
+    };
+    if (name.endsWith('-background')) {
+      const { verifySessionToken, getBearerToken } = require('./functions/auth-utils');
+      const actor = verifySessionToken(getBearerToken(event));
+      if (actor.role !== 'po-notify-worker') throw new Error('Unauthorized worker');
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end('{}');
+      Promise.resolve().then(() => mod.handler(event)).catch(error => console.error('Local background:', error.message));
+      return;
+    }
+    const result = await mod.handler(event);
 
     res.writeHead(result.statusCode || 200, result.headers || { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(result.body || '');
@@ -166,6 +181,7 @@ async function findFreePort(startPort, maxAttempts = 20) {
 async function main() {
   buildApp();
   const port = await findFreePort(preferredPort);
+  process.env.PO_WORKER_BASE_URL = `http://localhost:${port}`;
   const server = http.createServer(handleRequest);
   server.listen(port, () => {
     console.log('');

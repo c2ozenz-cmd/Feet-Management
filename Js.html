@@ -1537,6 +1537,34 @@ function sortPOList(pos) {
   });
 }
 
+function poNotificationHtml(notification) {
+  if (!notification) return '';
+  const sent = notification.status === 'sent';
+  const failed = ['pdf_failed', 'line_failed', 'config_failed', 'blocked'].includes(notification.status);
+  const label = sent ? 'LINE ส่งแล้ว' : failed ? 'LINE ส่งไม่สำเร็จ' : 'LINE รอส่ง';
+  const retry = failed && notification.status !== 'blocked' && isCurrentUserAdmin();
+  return `<div class="d-flex align-items-center gap-1 mt-1">
+    <span class="badge ${sent ? 'bg-success-light text-success' : failed ? 'bg-danger-light text-danger' : 'bg-warning-light text-warning'}" title="${escapeHtml(notification.error || '')}">${label}</span>
+    ${retry ? `<button class="btn btn-sm btn-outline-secondary" title="ลองส่งชุดที่ยังไม่สำเร็จอีกครั้ง" onclick="retryPONotification('${escapeHtml(notification.jobId)}')"><i class="bi bi-arrow-clockwise"></i></button>` : ''}
+  </div>`;
+}
+
+async function retryPONotification(id) {
+  const confirmation = await Swal.fire({ icon: 'question', title: 'ลองส่ง LINE อีกครั้ง?', text: 'ส่งเฉพาะรายการที่ยังไม่สำเร็จในชุดเดิม', showCancelButton: true, confirmButtonText: 'ลองใหม่', cancelButtonText: 'ยกเลิก' });
+  if (!confirmation.isConfirmed) return;
+  showLoading('กำลังนำเข้าคิว...');
+  try {
+    const response = await fetch('/.netlify/functions/po-notify-status', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${window.appSessionToken || ''}` }, body: JSON.stringify({ id })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.message || 'ลองส่งใหม่ไม่สำเร็จ');
+    Swal.close();
+    showToast(result.warning ? 'warning' : 'success', result.warning || 'นำเข้าคิวแล้ว');
+    loadPOs({ silent: true });
+  } catch (error) { Swal.close(); showToast('error', error.message); }
+}
+
 function renderPOTable(pos) {
   const tbody = document.getElementById('poTableBody');
   tbody.closest('table').classList.add('table-card-mobile');
@@ -1579,7 +1607,7 @@ function renderPOTable(pos) {
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
       <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
-      <td data-label="สถานะ" class="po-status-cell">${poStatusSelectHtml(p.poNo, p.status)}</td>
+      <td data-label="สถานะ" class="po-status-cell">${poStatusSelectHtml(p.poNo, p.status)}${poNotificationHtml(p.notification)}</td>
       <td data-label="การพิมพ์">
         ${p.printedAt
           ? `<span class="badge bg-success-light text-success"><i class="bi bi-printer-fill me-1"></i> พิมพ์แล้ว</span>`
@@ -1651,7 +1679,7 @@ function filterPOs() {
   const m = document.getElementById('poMonthFilter').value;
   
   filteredPOsList = allPOs.filter(p =>
-    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.plate || '').toLowerCase().includes(q) || (p.grpRef || '').toLowerCase().includes(q)) &&
+    (!q || p.poNo.toLowerCase().includes(q) || p.shopName.toLowerCase().includes(q) || (p.plate || '').toLowerCase().includes(q) || (p.vehiclePlates || []).some(plate => plate.toLowerCase().includes(q)) || (p.grpRef || '').toLowerCase().includes(q)) &&
     (!s || p.status === s) &&
     (!m || p.issueDate.startsWith(m))
   );
@@ -1858,6 +1886,16 @@ function showPOForm(po = null, options = {}) {
   document.getElementById('poListView').classList.add('d-none');
   document.getElementById('poFormView').classList.remove('d-none');
   poItemRows = [];
+  const multiVehicle = options.cloneFrom !== true && po?.plate === 'หลายคัน';
+  document.getElementById('poMultiVehicle').checked = multiVehicle;
+  document.getElementById('poPlate').disabled = multiVehicle;
+  document.getElementById('poRefRepairNo').disabled = multiVehicle;
+  const plateSelect = document.getElementById('poPlate').tomselect;
+  if (plateSelect) multiVehicle ? plateSelect.disable() : plateSelect.enable();
+  if (!allRepairs.length) google.script.run.withSuccessHandler(rows => {
+    allRepairs = rows || [];
+    if (document.getElementById('poMultiVehicle').checked) renderPOItems();
+  }).getRepairs();
 
   const linkedBtn = document.getElementById('createLinkedPOBtn');
 
@@ -1898,7 +1936,7 @@ function showPOForm(po = null, options = {}) {
       renderPOStepper(po.status);
       if (linkedBtn) linkedBtn.style.display = '';
       google.script.run.withSuccessHandler(items => {
-        poItemRows = items.map(i => ({ partName: i.partName, qty: i.qty, unit: i.unit, pricePerUnit: i.pricePerUnit, discount: i.discount, amount: i.amount, note: i.note || '' }));
+        poItemRows = items.map(i => ({ ...i }));
         renderPOItems();
         calcPOTotal();
       }).getPOItems(po.poNo);
@@ -1967,6 +2005,10 @@ function savePO() {
 
   if (!po.shopName || !po.plate || !po.issueDate) {
     showToast('warning', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบ');
+    return;
+  }
+  if (po.plate === 'หลายคัน' && (!poItemRows.length || poItemRows.some(item => !item.plate?.trim()))) {
+    showToast('warning', 'กรุณาระบุทะเบียนรถให้ครบทุกบรรทัด');
     return;
   }
 
@@ -2084,6 +2126,39 @@ function renderPOStepper(currentStatus) {
   }).join('');
 }
 
+function togglePOMultiVehicle() {
+  const multi = document.getElementById('poMultiVehicle').checked;
+  const plate = document.getElementById('poPlate');
+  const job = document.getElementById('poRefRepairNo');
+  if (multi) {
+    poItemRows.forEach(item => {
+      if (!item.plate) item.plate = plate.value === 'หลายคัน' ? '' : plate.value;
+      if (!item.refRepairNo) item.refRepairNo = job.value;
+    });
+  } else if (poItemRows.some(item => item.plate || item.refRepairNo)) {
+    if (!confirm('กลับเป็น PO รถคันเดียว และใช้ทะเบียน/Job จากหัว PO ทุกบรรทัด?')) {
+      document.getElementById('poMultiVehicle').checked = true;
+      return;
+    }
+    poItemRows.forEach(item => { item.plate = ''; item.refRepairNo = ''; });
+  }
+  setTomSelectInputValue('poPlate', multi ? 'หลายคัน' : '');
+  job.value = '';
+  plate.disabled = multi;
+  if (plate.tomselect) multi ? plate.tomselect.disable() : plate.tomselect.enable();
+  job.disabled = multi;
+  renderPOItems();
+}
+
+function updatePOItemJob(index, value) {
+  const repair = allRepairs.find(row => row.repairNo === value);
+  poItemRows[index].refRepairNo = value;
+  if (repair) {
+    poItemRows[index].plate = repair.plate;
+    renderPOItems();
+  }
+}
+
 function addPOItem() {
   poItemRows.push({ partName: '', qty: 1, unit: 'ชิ้น', pricePerUnit: 0, discount: 0, amount: 0, note: '' });
   renderPOItems();
@@ -2098,6 +2173,9 @@ function removePOItem(idx) {
 function renderPOItems() {
   const tbody = document.getElementById('poItemsBody');
   tbody.closest('table').classList.add('table-card-mobile');
+  const multi = document.getElementById('poMultiVehicle').checked;
+  const plateOptions = allBuses.map(bus => `<option value="${escapeHtml(bus.plate)}"></option>`).join('');
+  const jobOptions = allRepairs.map(repair => `<option value="${escapeHtml(repair.repairNo)}">${escapeHtml(repair.plate)}</option>`).join('');
   if (!poItemRows.length) {
     tbody.innerHTML = '<tr id="poItemsEmpty"><td colspan="8" data-label="" class="text-center text-muted py-3">ยังไม่มีรายการ</td></tr>';
     return;
@@ -2111,10 +2189,14 @@ function renderPOItems() {
           <button class="btn btn-outline-secondary" onclick="openPOPartPicker(${i})" title="เลือกจาก Stock"><i class="bi bi-search"></i></button>
         </div>
         <input type="text" class="form-control form-control-sm mt-1"
-          value="${p.note || ''}"
+          value="${escapeHtml(p.note || '')}"
           onchange="poItemRows[${i}].note=this.value"
           placeholder="📝 หมายเหตุ (เช่น ใช้กับรถ 30-4554)..."
           style="font-size:11px;color:#6b7280;border-style:dashed">
+        ${multi ? `<div class="row g-1 mt-1">
+          <div class="col-6"><input class="form-control form-control-sm" aria-label="ทะเบียนรายการ ${i + 1}" list="poItemPlates" value="${escapeHtml(p.plate || '')}" placeholder="ทะเบียนรถ" onchange="poItemRows[${i}].plate=this.value.trim()"></div>
+          <div class="col-6"><input class="form-control form-control-sm" aria-label="Job รายการ ${i + 1}" list="poItemJobs" value="${escapeHtml(p.refRepairNo || '')}" placeholder="เลข Job" onchange="updatePOItemJob(${i},this.value.trim())"></div>
+        </div>` : ''}
       </td>
       <td data-label="จำนวน">
         <input type="number" class="form-control form-control-sm" value="${p.qty}" min="0" step="0.01" onchange="poItemRows[${i}].qty=parseFloat(this.value)||0;calcPOItemAmount(${i})">
@@ -2137,6 +2219,11 @@ function renderPOItems() {
         </div>
       </td>
     </tr>`).join('');
+  document.getElementById('poItemContextLists')?.remove();
+  const lists = document.createElement('div');
+  lists.id = 'poItemContextLists';
+  lists.innerHTML = `<datalist id="poItemPlates">${plateOptions}</datalist><datalist id="poItemJobs">${jobOptions}</datalist>`;
+  tbody.closest('.table-responsive').appendChild(lists);
 }
 
 function calcPOItemAmount(idx) {
@@ -3038,7 +3125,7 @@ function renderPrintPreview(po, items, settingsArr, sigUrl, options = {}) {
       return `
       <tr style="background:${globalIdx % 2 === 0 ? '#fff' : '#f9fafb'};border-bottom:1px solid #eee">
         <td style="padding:5px 8px;text-align:center;color:#aaa">${it ? globalIdx + 1 : ''}</td>
-        <td style="padding:5px 8px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35">${it ? it.partName : ''}</td>
+        <td style="padding:5px 8px;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.35">${it ? escapeHtml(it.partName) : ''}${it && POItemContext.label(it) ? `<div style="font-size:10px;color:#555">${escapeHtml(POItemContext.label(it))}</div>` : ''}</td>
         <td style="padding:5px 8px;text-align:center">${it ? it.qty : ''}</td>
         <td style="padding:5px 8px;text-align:center;color:#888">${it ? (it.unit || '') : ''}</td>
         <td style="padding:5px 8px;text-align:right">${it ? fmtNum(it.pricePerUnit) : ''}</td>
@@ -4282,6 +4369,7 @@ const SYSTEM_SETTING_PREFIXES = [
   'pending_report:',
   'po_approval:',
   'po_trash:',
+  'po_notify:',
   'user_permissions:'
 ];
 
@@ -4982,7 +5070,7 @@ function confirmPOMultiPick() {
   const picked = allStock.filter(s => selectedPOPartIds.has(s.id));
   picked.forEach(s => {
     // ไม่เพิ่มซ้ำถ้ามีในตารางแล้ว
-    const exists = poItemRows.find(r => r.partName === s.partName);
+    const exists = !document.getElementById('poMultiVehicle').checked && poItemRows.find(r => r.partName === s.partName);
     if (!exists) {
       poItemRows.push({
         partName    : s.partName,
@@ -5003,7 +5091,7 @@ function confirmPOMultiPick() {
 function pickPOCustomPart() {
   const name = document.getElementById('poPartPickerCustom').value.trim();
   if (!name) return;
-  const exists = poItemRows.find(r => r.partName === name);
+  const exists = !document.getElementById('poMultiVehicle').checked && poItemRows.find(r => r.partName === name);
   if (!exists) {
     poItemRows.push({
       partName    : name,

@@ -140,7 +140,13 @@
         <input type="date" id="poIssueDate" class="form-control" required>
       </div>
       <div class="col-md-4">
-        <label class="form-label">ทะเบียนรถ <span class="text-danger">*</span></label>
+        <div class="d-flex align-items-baseline justify-content-between gap-2">
+          <label class="form-label" for="poPlate">ทะเบียนรถ <span class="text-danger">*</span></label>
+          <label class="d-inline-flex align-items-center gap-2 mb-0 text-nowrap" for="poMultiVehicle">
+            <input class="form-check-input m-0" type="checkbox" id="poMultiVehicle" onchange="togglePOMultiVehicle()">
+            <span>หลายคัน</span>
+          </label>
+        </div>
         <div class="combo-wrapper">
           <input type="text" id="poPlate" class="form-control"
             placeholder="พิมพ์หรือเลือกทะเบียน..."

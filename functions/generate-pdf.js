@@ -3,6 +3,7 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
+const POItemContext = require('../public/po-item-context');
 
 // Initialize Supabase
 let supabase;
@@ -42,7 +43,12 @@ exports.handler = async (event, context) => {
     const { regular: fontRegularBuffer, bold: fontBoldBuffer } = await fetchSarabunFonts();
 
     // 5. Create PDF
-    const pdfBuffer = await createPO_PDF(po, items || [], settings, fontRegularBuffer, fontBoldBuffer);
+    const printableItems = (items || []).map(item => {
+      const context = POItemContext.decode(item.note);
+      const label = POItemContext.label(context);
+      return { ...item, note: context.note, contextLabel: label };
+    });
+    const pdfBuffer = await createPO_PDF(po, printableItems, settings, fontRegularBuffer, fontBoldBuffer);
 
     // 6. Upload PDF to Supabase Storage
     const fileName = `PO_${poNo}.pdf`;
@@ -391,7 +397,8 @@ function measurePORowHeight(doc, item) {
   if (!item) return PO_TABLE.minRowHeight;
   const lines = wrapTextByWidth(doc, item.part_name || '', PO_TABLE.itemNameWidth, PO_TABLE.itemNameText)
     .slice(0, PO_TABLE.itemNameText.maxLines);
-  return Math.max(PO_TABLE.minRowHeight, 12 + (Math.max(1, lines.length) * PO_TABLE.itemNameText.lineHeight));
+  const contextLines = item.contextLabel ? wrapTextByWidth(doc, item.contextLabel, PO_TABLE.itemNameWidth, PO_TABLE.itemNameText) : [];
+  return Math.max(PO_TABLE.minRowHeight, 12 + ((Math.max(1, lines.length) + contextLines.length) * PO_TABLE.itemNameText.lineHeight));
 }
 
 function pageStartY(pageIndex) {
@@ -539,13 +546,17 @@ function drawOldStyleTable(doc, pageItems, startIndex, y) {
   if (!rows.length) rows.push(null, null, null);
   rows.forEach((item, i) => {
     const itemNameLines = item ? wrapTextByWidth(doc, item.part_name || '', itemNameWidth, itemNameText).slice(0, itemNameText.maxLines) : [];
-    const rowH = item ? Math.max(minRowH, 12 + (itemNameLines.length * itemNameText.lineHeight)) : minRowH;
+    const contextLines = item?.contextLabel ? wrapTextByWidth(doc, item.contextLabel, itemNameWidth, itemNameText) : [];
+    const rowH = item ? Math.max(minRowH, 12 + ((itemNameLines.length + contextLines.length) * itemNameText.lineHeight)) : minRowH;
     const bg = (startIndex + i) % 2 === 0 ? '#ffffff' : '#f9fafb';
     doc.rect(left, y, width, rowH).fill(bg);
     if (item) {
       drawText(doc, String(startIndex + i + 1), left, y + 8, 32, { size: 7.5, color: '#777777', align: 'center' });
       itemNameLines.forEach((line, lineIndex) => {
         drawText(doc, line, left + 38, y + 7 + (lineIndex * itemNameText.lineHeight), itemNameWidth, { size: itemNameText.size });
+      });
+      contextLines.forEach((line, lineIndex) => {
+        drawText(doc, line, left + 38, y + 7 + ((itemNameLines.length + lineIndex) * itemNameText.lineHeight), itemNameWidth, { size: itemNameText.size, color: '#555555' });
       });
       drawText(doc, String(item.qty || ''), left + 270, y + 8, 48, { size: 7.5, align: 'center' });
       drawText(doc, item.unit || '', left + 318, y + 8, 45, { size: 7.5, color: '#777777', align: 'center' });

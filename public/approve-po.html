@@ -484,7 +484,7 @@
       setBusy(true);
       resultText.classList.remove('hidden');
       resultText.textContent = action === 'approve'
-        ? 'กำลังอนุมัติและสร้าง PDF พร้อมลายเซ็น...'
+        ? 'กำลังบันทึกผลอนุมัติ...'
         : 'กำลังบันทึกผลปฏิเสธ...';
       try {
         const res = await fetch(`/.netlify/functions/po-approval?token=${encodeURIComponent(token)}`, {

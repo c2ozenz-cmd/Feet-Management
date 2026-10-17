@@ -250,8 +250,7 @@
         .eq('po_no', poNo)
         .single();
       if (poErr) throw poErr;
-      const repairNo = po?.ref_repair_no;
-      if (!repairNo) return 0;
+      const headerRepairNo = po?.ref_repair_no;
 
       const { data: items, error: itemsErr } = await supabase
         .from('po_items')
@@ -261,6 +260,8 @@
 
       let rollbackCount = 0;
       for (const item of (items || [])) {
+        const repairNo = POItemContext.decode(item.note).refRepairNo || headerRepairNo;
+        if (!repairNo) continue;
         const partName = item.part_name;
         const qty = parseFloat(item.qty) || 0;
         if (!partName || qty <= 0) continue;
@@ -293,8 +294,7 @@
         .eq('po_no', poNo)
         .single();
       if (poErr) throw poErr;
-      const repairNo = po?.ref_repair_no;
-      if (!repairNo) return;
+      const headerRepairNo = po?.ref_repair_no;
 
       const { data: items, error: itemsErr } = await supabase
         .from('po_items')
@@ -303,6 +303,8 @@
       if (itemsErr) throw itemsErr;
 
       for (const item of (items || [])) {
+        const repairNo = POItemContext.decode(item.note).refRepairNo || headerRepairNo;
+        if (!repairNo) continue;
         const partName = item.part_name;
         if (!partName) continue;
         const { data: existing, error: existingErr } = await supabase
@@ -873,13 +875,34 @@
       try {
         const { data, error } = await supabase.from('purchase_orders').select('*').order('po_no', { ascending: false });
         if (error) throw error;
+        const multiNos = data.filter(po => po.plate === 'หลายคัน').map(po => po.po_no);
+        let multiItems = [];
+        if (multiNos.length) {
+          const result = await supabase.from('po_items').select('po_no,note').in('po_no', multiNos);
+          if (result.error) throw result.error;
+          multiItems = result.data || [];
+        }
+        let notifications = new Map();
+        if (window.appSessionToken) {
+          try {
+            const response = await fetch('/.netlify/functions/po-notify-status', {
+              headers: { Authorization: `Bearer ${window.appSessionToken}` }
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+              (result.items || []).sort((a, b) => a.createdAt - b.createdAt).forEach(item => notifications.set(item.poNo, item));
+            }
+          } catch (error) { console.warn('PO notification status unavailable:', error.message); }
+        }
         const mapped = data.map(po => ({
           poNo: po.po_no, shopName: po.shop_name, shopAddress: po.shop_address, taxId: po.tax_id,
           issueDate: po.issue_date, quoteDate: po.quote_date, refRepairNo: po.ref_repair_no,
           quoteNo: po.quote_no, plate: po.plate, vatType: po.vat_type, status: po.status,
           createdBy: po.created_by, createdAt: po.created_at, createdBySignatureUrl: po.created_by_signature_url,
           approvedBy: po.approved_by, approvedAt: po.approved_at, lineSentAt: po.line_sent_at,
-          pdfUrl: po.pdf_url, grpRef: po.grp_ref, quoteNoIsAuto: po.quote_no_is_auto, printedAt: po.printed_at
+          pdfUrl: po.pdf_url, grpRef: po.grp_ref, quoteNoIsAuto: po.quote_no_is_auto, printedAt: po.printed_at,
+          vehiclePlates: [...new Set(multiItems.filter(item => item.po_no === po.po_no).map(item => POItemContext.decode(item.note).plate).filter(Boolean))],
+          notification: notifications.get(po.po_no) || null
         }));
         this._ok(mapped);
       } catch (err) { this._err(err); }
@@ -891,7 +914,7 @@
         if (error) throw error;
         this._ok(data.map(i => ({
           poNo: i.po_no, partName: i.part_name, qty: i.qty, unit: i.unit,
-          pricePerUnit: i.price_per_unit, discount: i.discount, amount: i.amount, note: i.note
+          pricePerUnit: i.price_per_unit, discount: i.discount, amount: i.amount, ...POItemContext.decode(i.note)
         })));
       } catch (err) { this._err(err); }
     }
@@ -939,7 +962,7 @@
           pricePerUnit: i.price_per_unit,
           discount: i.discount,
           amount: i.amount,
-          note: i.note
+          ...POItemContext.decode(i.note)
         }));
 
         const settings = (settingsRes.data || []).map(s => ({ key: s.key, value: s.value }));
@@ -959,6 +982,20 @@
 
     async savePO(po, items) {
       try {
+        if (po.plate === 'หลายคัน' && (!items?.length || items.some(item => !item.plate || item.plate === 'หลายคัน'))) {
+          throw new Error('กรุณาระบุทะเบียนรถในรายการสินค้าให้ครบทุกบรรทัด');
+        }
+        if (po.plate === 'หลายคัน') {
+          const jobNos = [...new Set(items.map(item => item.refRepairNo).filter(Boolean))];
+          if (jobNos.length) {
+            const { data: jobs, error: jobError } = await supabase.from('repairs').select('repair_no,plate').in('repair_no', jobNos);
+            if (jobError) throw jobError;
+            for (const item of items.filter(item => item.refRepairNo)) {
+              const job = (jobs || []).find(row => row.repair_no === item.refRepairNo);
+              if (!job || job.plate !== item.plate) throw new Error(`ทะเบียนหรือ Job ไม่ตรงกัน: ${item.refRepairNo}`);
+            }
+          }
+        }
         let poNo = po.poNo;
 
         if (!poNo) {
@@ -1018,7 +1055,7 @@
             price_per_unit: parseFloat(item.pricePerUnit) || 0,
             discount: parseFloat(item.discount) || 0,
             amount: parseFloat(item.amount) || 0,
-            note: item.note || ''
+            note: POItemContext.encode(item)
           }));
           const { error } = await supabase.from('po_items').insert(itemsPayload);
           if (error) throw error;
@@ -1767,7 +1804,7 @@
         // Fetch PO items to calculate totals
         const { data: poItems, error: itemsErr } = await supabase
           .from('po_items')
-          .select('po_no, amount');
+          .select('po_no, amount, note');
         if (itemsErr) throw itemsErr;
 
         const poTotals = {};
@@ -1805,7 +1842,13 @@
           approvedAt: p.approved_at
         }));
 
-        const filteredPO = mappedPOs.filter(p => {
+        const expensePOs = mappedPOs.flatMap(p => {
+          if (p.plate !== 'หลายคัน') return [{ ...p, total: poTotals[p.poNo] || 0 }];
+          const rawPO = (pos || []).find(row => row.po_no === p.poNo);
+          return POItemContext.group((poItems || []).filter(item => item.po_no === p.poNo), rawPO)
+            .map(group => ({ ...p, ...group }));
+        });
+        const filteredPO = expensePOs.filter(p => {
           if (p.status !== 'รับของแล้ว') return false;
           const d = new Date(p.issueDate);
           if (from && d < from) return false;
@@ -1813,7 +1856,7 @@
           if (plates.length && !plates.includes(p.plate)) return false;
           if (shopNames.length && !shopNames.includes(p.shopName)) return false;
           return true;
-        }).map(p => ({ ...p, total: poTotals[p.poNo] || 0, source: 'PO' }));
+        }).map(p => ({ ...p, source: 'PO' }));
 
         // Manual Deduct OUT-MANUAL from stock_logs
         const { data: logs, error: logsErr } = await supabase
@@ -1879,7 +1922,7 @@
         this._ok({
           success: true,
           total: grandTotal,
-          count: allRows.length,
+          count: new Set(filteredPO.map(row => row.poNo)).size + manualRows.length,
           byPlate: Object.entries(byPlate)
             .map(([plate, total]) => ({ plate, total }))
             .sort((a, b) => b.total - a.total),
