@@ -18,6 +18,43 @@
     </div>
   </div>
 
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation"><button type="button" id="poListTab" class="nav-link active" role="tab" aria-selected="true" aria-controls="poMainList" onclick="setPOView('list')"><i class="bi bi-list-ul me-1"></i>รายการ PO</button></li>
+    <li class="nav-item" role="presentation"><button type="button" id="poHistoryTab" class="nav-link" role="tab" aria-selected="false" aria-controls="poItemHistory" onclick="setPOView('history')"><i class="bi bi-search me-1"></i>ประวัติรายการ</button></li>
+  </ul>
+  <section id="poItemHistory" class="d-none" role="tabpanel" aria-labelledby="poHistoryTab">
+    <div class="row g-2 mb-3">
+      <div class="col-12 col-lg-6"><label for="poHistoryQuery" class="form-label">ค้นหารายการ / หมายเหตุ / เลข PO / Job</label><input id="poHistoryQuery" type="search" class="form-control" placeholder="หัวฉีด / เปลี่ยนหัวฉีด / injector" oninput="filterPOHistory()"></div>
+      <div class="col-6 col-lg-3"><label for="poHistoryFrom" class="form-label">ตั้งแต่วันที่</label><input id="poHistoryFrom" type="date" class="form-control" onchange="filterPOHistory()"></div>
+      <div class="col-6 col-lg-3"><label for="poHistoryTo" class="form-label">ถึงวันที่</label><input id="poHistoryTo" type="date" class="form-control" onchange="filterPOHistory()"></div>
+      <div class="col-12 col-md-4"><label for="poHistoryPlate" class="form-label">ทะเบียนรถ</label><select id="poHistoryPlate" class="form-select" data-no-tomselect onchange="filterPOHistory()"><option value="">ทุกทะเบียน</option></select></div>
+      <div class="col-12 col-md-4"><label for="poHistoryShop" class="form-label">ร้านค้า</label><select id="poHistoryShop" class="form-select" data-no-tomselect onchange="filterPOHistory()"><option value="">ทุกร้านค้า</option></select></div>
+      <div class="col-12 col-md-4"><label for="poHistoryStatus" class="form-label">สถานะ</label><select id="poHistoryStatus" class="form-select" data-no-tomselect onchange="filterPOHistory()"><option value="">ทุกสถานะ</option></select></div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+      <span id="poHistorySummary" class="text-muted" aria-live="polite">กำลังโหลดข้อมูล...</span>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="printPOHistoryReport()"><i class="bi bi-printer me-1"></i>พิมพ์รายงานสรุป</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadPOHistory(true)" title="รีเฟรชประวัติรายการ"><i class="bi bi-arrow-clockwise"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearPOHistoryFilters()" title="ล้างตัวกรอง"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+    <div class="table-responsive border-top">
+      <table class="table table-hover align-middle mb-0 po-history-table">
+        <thead><tr><th>PO / วันที่ / สถานะ</th><th>ทะเบียน / Job</th><th>รายการ / หมายเหตุ</th><th>ร้านค้า</th><th class="text-end">จำนวน</th><th class="text-end">ยอดรายการ</th><th class="text-end">ยอดรวม PO</th><th></th></tr></thead>
+        <tbody id="poHistoryBody"></tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center gap-2 py-3">
+      <span id="poHistoryPageInfo" class="text-muted small"></span>
+      <div class="d-flex gap-2">
+        <button id="poHistoryPrev" type="button" class="btn btn-sm btn-outline-secondary" title="หน้าก่อนหน้า" onclick="changePOHistoryPage(-1)"><i class="bi bi-chevron-left"></i></button>
+        <button id="poHistoryNext" type="button" class="btn btn-sm btn-outline-secondary" title="หน้าถัดไป" onclick="changePOHistoryPage(1)"><i class="bi bi-chevron-right"></i></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="poMainList" role="tabpanel" aria-labelledby="poListTab">
   <div class="search-bar">
     <input type="text" id="poSearch" class="form-control" placeholder="ค้นหาเลข PO / ร้านค้า / ทะเบียนรถ / รหัสกลุ่ม GRP..." oninput="filterPOs()">
     <input type="month" id="poMonthFilter" class="form-control" style="max-width:180px" onchange="filterPOs()">
@@ -91,6 +128,7 @@
       </div>
     </div>
   </div>
+  </section>
 </div>
 
 <!-- PO FORM VIEW -->

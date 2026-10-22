@@ -871,6 +871,26 @@
     }
 
     // ── PURCHASE ORDERS ──
+    async getPOItemHistory() {
+      try {
+        const readAll = async (table, columns, order) => {
+          const rows = [];
+          for (let offset = 0; ; offset += 500) {
+            const { data, error } = await supabase.from(table).select(columns).order(order).range(offset, offset + 499);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < 500) break;
+          }
+          return rows;
+        };
+        const [pos, items] = await Promise.all([
+          readAll('purchase_orders', 'po_no,shop_name,issue_date,status,plate,ref_repair_no,vat_type,pdf_url', 'po_no'),
+          readAll('po_items', 'id,po_no,part_name,note,qty,unit,amount', 'id')
+        ]);
+        this._ok(POItemSearch.buildRows(pos, items));
+      } catch (error) { this._err(error); }
+    }
+
     async getPOs() {
       try {
         const { data, error } = await supabase.from('purchase_orders').select('*').order('po_no', { ascending: false });

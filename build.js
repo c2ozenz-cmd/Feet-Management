@@ -47,7 +47,7 @@ indexContent = indexContent.replace(includeRegex, (match, fileKey) => {
     
     // If it's Js.html, prepend our compatibility bridge
     if (fileKey.toLowerCase() === 'js') {
-      fileContent = `<script src="po-item-context.js"></script>\n<script src="supabase-bridge.js"></script>\n` + fileContent;
+      fileContent = `<script src="po-item-context.js"></script>\n<script src="po-item-search.js"></script>\n<script src="supabase-bridge.js"></script>\n` + fileContent;
     }
     return fileContent;
   } else {

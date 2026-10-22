@@ -396,9 +396,9 @@ body {
 .status-waiting-parts { background: rgba(90,90,90,0.12); color: #555; }
 .status-done { background: rgba(90,138,106,0.15); color: var(--claude-success); }
 .po-status-cell {
-  width: 150px;
-  min-width: 150px;
-  max-width: 150px;
+  width: 196px;
+  min-width: 196px;
+  max-width: 196px;
   overflow: visible;
 }
 .po-status-select {
@@ -409,6 +409,13 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.po-status-inline { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-height: 28px; }
+.po-line-indicator { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 28px; flex: 0 0 26px; border: 0; border-radius: 4px; background: transparent; padding: 0; font-size: 16px; cursor: pointer; }
+.po-line-indicator.is-sent { color: #14915a; }
+.po-line-indicator.is-pending { color: #777f88; }
+.po-line-indicator.is-failed { color: #c74343; }
+.po-line-indicator:hover, .po-line-indicator:focus-visible { background: #edf0f2; outline: 2px solid currentColor; outline-offset: 1px; }
+.po-line-error-dot { position: absolute; right: 1px; top: 2px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
 /* ── STEPPER ── */
 .repair-stepper {
@@ -1403,4 +1410,17 @@ body {
   background: rgba(59,130,246,0.16);
   color: #1d4ed8;
 }
+#poItemHistory .form-control,
+#poItemHistory .form-select { background-color: #fff; }
+.po-history-table { font-size: 13px; min-width: 960px; }
+.po-history-table th { white-space: nowrap; }
+.po-history-table td { vertical-align: top; }
+.po-history-description { min-width: 230px; max-width: 420px; overflow-wrap: anywhere; white-space: normal; }
+#poListView > .nav-tabs { gap: 4px; border-bottom: 2px solid var(--claude-border); }
+#poListView > .nav-tabs .nav-link { border: 0; border-radius: 4px 4px 0 0; padding: 11px 20px; color: var(--claude-secondary); font-weight: 600; }
+#poListView > .nav-tabs .nav-link.active { color: var(--claude-primary); background: #fff; box-shadow: inset 0 -3px var(--claude-primary); }
+#poItemHistory > .row { padding: 16px 0; border-bottom: 1px solid var(--claude-border); }
+#poItemHistory .form-label { font-weight: 600; margin-bottom: 6px; }
+#poItemHistory .form-control, #poItemHistory .form-select { min-height: 38px; }
+#poHistorySummary { font-weight: 600; color: var(--claude-secondary) !important; }
 </style>

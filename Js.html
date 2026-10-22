@@ -15,6 +15,13 @@ let poSortMode = 'poNoDesc';
 let poPageSize = 15;
 let poCurrentPage = 1;
 let filteredPOsList = [];
+let poViewMode = 'list';
+let poHistoryRows = [];
+let poHistoryFiltered = [];
+let poHistoryLoaded = false;
+let poHistoryLoading = false;
+let poHistoryPage = 1;
+const poHistoryPageSize = 25;
 let poAutoRefreshTimer = null;
 let poRefreshInFlight = false;
 let lastPOAutoRefreshAt = 0;
@@ -1420,6 +1427,7 @@ function refreshPOsSilently() {
 }
 
 function manualRefreshPOs(options = {}) {
+  if (poViewMode === 'history') { loadPOHistory(true); return; }
   if (!isPOListVisible() || poRefreshInFlight) return;
   const silent = options.silent === true;
   poRefreshInFlight = true;
@@ -1451,6 +1459,8 @@ function loadPOs(options = {}) {
   }
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
+    poHistoryLoaded = false;
+    if (poViewMode === 'history') loadPOHistory(true);
     lastPOAutoRefreshAt = Date.now();
     
     // ตั้งค่าตัวเลือกเดือนเริ่มต้นเป็นเดือนล่าสุดที่มีข้อมูล PO เพื่อการแสดงผลที่ตอบโจทย์
@@ -1537,21 +1547,35 @@ function sortPOList(pos) {
   });
 }
 
-function poNotificationHtml(notification) {
+function poNotificationHtml(notification, poNo) {
   if (!notification) return '';
   const sent = notification.status === 'sent';
   const failed = ['pdf_failed', 'line_failed', 'config_failed', 'blocked'].includes(notification.status);
   const label = sent ? 'LINE ส่งแล้ว' : failed ? 'LINE ส่งไม่สำเร็จ' : 'LINE รอส่ง';
-  const retry = failed && notification.status !== 'blocked' && isCurrentUserAdmin();
-  return `<div class="d-flex align-items-center gap-1 mt-1">
-    <span class="badge ${sent ? 'bg-success-light text-success' : failed ? 'bg-danger-light text-danger' : 'bg-warning-light text-warning'}" title="${escapeHtml(notification.error || '')}">${label}</span>
-    ${retry ? `<button class="btn btn-sm btn-outline-secondary" title="ลองส่งชุดที่ยังไม่สำเร็จอีกครั้ง" onclick="retryPONotification('${escapeHtml(notification.jobId)}')"><i class="bi bi-arrow-clockwise"></i></button>` : ''}
-  </div>`;
+  return `<button type="button" class="po-line-indicator ${sent ? 'is-sent' : failed ? 'is-failed' : 'is-pending'}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" data-po-no="${escapeHtml(poNo)}" onclick="showPONotification(this.dataset.poNo)"><i class="bi bi-line" aria-hidden="true"></i>${failed ? '<span class="po-line-error-dot" aria-hidden="true"></span>' : ''}</button>`;
 }
 
-async function retryPONotification(id) {
-  const confirmation = await Swal.fire({ icon: 'question', title: 'ลองส่ง LINE อีกครั้ง?', text: 'ส่งเฉพาะรายการที่ยังไม่สำเร็จในชุดเดิม', showCancelButton: true, confirmButtonText: 'ลองใหม่', cancelButtonText: 'ยกเลิก' });
-  if (!confirmation.isConfirmed) return;
+async function showPONotification(poNo) {
+  const notification = allPOs.find(po => po.poNo === poNo)?.notification;
+  if (!notification) return;
+  const sent = notification.status === 'sent';
+  const failed = ['pdf_failed', 'line_failed', 'config_failed', 'blocked'].includes(notification.status);
+  const retry = failed && notification.status !== 'blocked' && isCurrentUserAdmin();
+  const result = await Swal.fire({
+    icon: sent ? 'success' : failed ? 'error' : 'info',
+    title: sent ? 'ส่ง LINE แล้ว' : failed ? 'ส่ง LINE ไม่สำเร็จ' : 'รอส่ง LINE',
+    text: `${poNo}${notification.error ? ': ' + notification.error : ''}`,
+    confirmButtonText: retry ? 'ลองส่งใหม่' : 'ปิด',
+    showCancelButton: retry, cancelButtonText: 'ปิด'
+  });
+  if (retry && result.isConfirmed) retryPONotification(notification.jobId, true);
+}
+
+async function retryPONotification(id, confirmed = false) {
+  if (!confirmed) {
+    const confirmation = await Swal.fire({ icon: 'question', title: 'ลองส่ง LINE อีกครั้ง?', text: 'ส่งเฉพาะรายการที่ยังไม่สำเร็จในชุดเดิม', showCancelButton: true, confirmButtonText: 'ลองใหม่', cancelButtonText: 'ยกเลิก' });
+    if (!confirmation.isConfirmed) return;
+  }
   showLoading('กำลังนำเข้าคิว...');
   try {
     const response = await fetch('/.netlify/functions/po-notify-status', {
@@ -1607,7 +1631,7 @@ function renderPOTable(pos) {
       <td data-label="อ้างอิงซ่อม">${p.refRepairNo || '—'}</td>
       <td data-label="ทะเบียน"><span class="badge" style="background:rgba(61,79,107,0.12);color:var(--claude-secondary)">${p.plate}</span></td>
       <td data-label="วันที่ออก">${formatDate(p.issueDate)}</td>
-      <td data-label="สถานะ" class="po-status-cell">${poStatusSelectHtml(p.poNo, p.status)}${poNotificationHtml(p.notification)}</td>
+      <td data-label="สถานะ" class="po-status-cell"><div class="po-status-inline">${poStatusSelectHtml(p.poNo, p.status)}${poNotificationHtml(p.notification, p.poNo)}</div></td>
       <td data-label="การพิมพ์">
         ${p.printedAt
           ? `<span class="badge bg-success-light text-success"><i class="bi bi-printer-fill me-1"></i> พิมพ์แล้ว</span>`
@@ -1876,6 +1900,133 @@ function applyPOPreset(kind) {
   filterPOs();
 }
 
+
+function setPOView(mode) {
+  poViewMode = mode === 'history' ? 'history' : 'list';
+  const history = poViewMode === 'history';
+  document.getElementById('poMainList').classList.toggle('d-none', history);
+  document.getElementById('poItemHistory').classList.toggle('d-none', !history);
+  ['poListTab', 'poHistoryTab'].forEach((id, index) => {
+    const active = index === (history ? 1 : 0);
+    document.getElementById(id).classList.toggle('active', active);
+    document.getElementById(id).setAttribute('aria-selected', String(active));
+  });
+  if (history) loadPOHistory();
+}
+
+function loadPOHistory(force = false) {
+  if (poHistoryLoading) return;
+  if (poHistoryLoaded && !force) { filterPOHistory(false); return; }
+  poHistoryLoading = true;
+  document.getElementById('poHistorySummary').textContent = 'กำลังโหลดข้อมูล...';
+  document.getElementById('poHistoryBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">กำลังโหลดข้อมูล...</td></tr>';
+  document.getElementById('poHistoryPageInfo').textContent = '';
+  document.getElementById('poHistoryPrev').disabled = true;
+  document.getElementById('poHistoryNext').disabled = true;
+  google.script.run.withSuccessHandler(rows => {
+    poHistoryLoading = false;
+    poHistoryLoaded = true;
+    poHistoryRows = rows || [];
+    [['poHistoryPlate', 'plate', 'ทุกทะเบียน'], ['poHistoryShop', 'shopName', 'ทุกร้านค้า'], ['poHistoryStatus', 'status', 'ทุกสถานะ']].forEach(([id, key, label]) => {
+      const element = document.getElementById(id), value = element.value;
+      const values = [...new Set(poHistoryRows.map(row => row[key]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+      element.innerHTML = `<option value="">${label}</option>` + values.map(option => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('');
+      element.value = values.includes(value) ? value : '';
+    });
+    filterPOHistory();
+  }).withFailureHandler(error => {
+    poHistoryLoading = false;
+    poHistoryLoaded = false;
+    document.getElementById('poHistorySummary').textContent = 'โหลดประวัติไม่สำเร็จ';
+    document.getElementById('poHistoryBody').innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${escapeHtml(error.message || 'โหลดข้อมูลไม่สำเร็จ')} <button class="btn btn-sm btn-outline-secondary" onclick="loadPOHistory(true)">ลองใหม่</button></td></tr>`;
+  }).getPOItemHistory();
+}
+
+function filterPOHistory(resetPage = true) {
+  if (poHistoryLoading || !poHistoryLoaded) return;
+  const from = document.getElementById('poHistoryFrom').value;
+  const to = document.getElementById('poHistoryTo').value;
+  const invalid = from && to && from > to;
+  poHistoryFiltered = invalid ? [] : POItemSearch.search(poHistoryRows, {
+    query: document.getElementById('poHistoryQuery').value, from, to,
+    plate: document.getElementById('poHistoryPlate').value,
+    shopName: document.getElementById('poHistoryShop').value,
+    status: document.getElementById('poHistoryStatus').value
+  });
+  if (resetPage) poHistoryPage = 1;
+  renderPOHistory(invalid);
+}
+
+function renderPOHistory(invalidDates = false) {
+  const rows = poHistoryFiltered;
+  const pages = Math.max(1, Math.ceil(rows.length / poHistoryPageSize));
+  poHistoryPage = Math.max(1, Math.min(poHistoryPage, pages));
+  const start = (poHistoryPage - 1) * poHistoryPageSize;
+  document.getElementById('poHistorySummary').textContent = invalidDates ? 'วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด'
+    : `${rows.length.toLocaleString('th-TH')} รายการ · ${new Set(rows.map(row => row.poNo)).size.toLocaleString('th-TH')} PO · ยอดรายการที่พบ ${fmtNum(rows.reduce((sum, row) => sum + Math.round(row.amount * 100), 0) / 100)} บาท`;
+  document.getElementById('poHistoryBody').innerHTML = rows.slice(start, start + poHistoryPageSize).map((row, index) => {
+    const pdfUrl = /^https?:\/\//i.test(row.pdfUrl) ? row.pdfUrl : '';
+    return `<tr>
+      <td><strong>${escapeHtml(row.poNo)}</strong><div class="small text-muted">${escapeHtml(formatDate(row.issueDate))}</div><div class="small">${escapeHtml(row.status)}</div></td>
+      <td>${escapeHtml(row.plate || '—')}<div class="small text-muted">${escapeHtml(row.refRepairNo || '')}</div></td>
+      <td class="po-history-description">${escapeHtml(row.partName)}${row.note ? `<div class="small text-muted mt-1" style="white-space:pre-wrap">${escapeHtml(row.note)}</div>` : ''}</td>
+      <td>${escapeHtml(row.shopName)}</td>
+      <td class="text-end text-nowrap">${fmtNum(row.qty)} ${escapeHtml(row.unit)}</td>
+      <td class="text-end text-nowrap fw-semibold">${fmtNum(row.amount)}</td>
+      <td class="text-end text-nowrap">${fmtNum(row.poTotal)}</td>
+      <td><div class="d-flex gap-1">
+        <button class="btn btn-sm btn-outline-primary" title="เปิดรายละเอียด PO" onclick="previewPOHistory(${start + index})"><i class="bi bi-eye"></i></button>
+        ${pdfUrl ? `<a class="btn btn-sm btn-outline-secondary" title="เปิด PDF ที่บันทึกไว้" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener noreferrer"><i class="bi bi-file-earmark-pdf"></i></a>` : ''}
+      </div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="text-center text-muted py-4">ไม่พบรายการ</td></tr>';
+  document.getElementById('poHistoryPageInfo').textContent = rows.length ? `${start + 1}–${Math.min(start + poHistoryPageSize, rows.length)} จาก ${rows.length} รายการ · หน้า ${poHistoryPage}/${pages}` : '';
+  document.getElementById('poHistoryPrev').disabled = poHistoryPage <= 1;
+  document.getElementById('poHistoryNext').disabled = poHistoryPage >= pages || !rows.length;
+}
+
+function printPOHistoryReport() {
+  if (poHistoryLoading || !poHistoryLoaded || !poHistoryFiltered.length) {
+    showToast('warning', 'ไม่มีรายการสำหรับพิมพ์'); return;
+  }
+  const rows = poHistoryFiltered;
+  const groups = new Map();
+  rows.forEach(row => {
+    const key = JSON.stringify([row.plate, row.shopName]);
+    const group = groups.get(key) || { plate: row.plate, shop: row.shopName, amount: 0, count: 0, pos: new Set() };
+    group.amount += Math.round(row.amount * 100); group.count++; group.pos.add(row.poNo); groups.set(key, group);
+  });
+  const total = rows.reduce((sum, row) => sum + Math.round(row.amount * 100), 0) / 100;
+  const filters = [['คำค้น', 'poHistoryQuery'], ['ตั้งแต่', 'poHistoryFrom'], ['ถึง', 'poHistoryTo'], ['ทะเบียน', 'poHistoryPlate'], ['ร้านค้า', 'poHistoryShop'], ['สถานะ', 'poHistoryStatus']]
+    .map(([label, id]) => document.getElementById(id).value ? `${label}: ${document.getElementById(id).value}` : '').filter(Boolean).join(' · ');
+  const win = window.open('', '_blank');
+  if (!win) { showToast('warning', 'กรุณาอนุญาตหน้าต่างป๊อปอัปเพื่อพิมพ์รายงาน'); return; }
+  const summary = [...groups.values()].sort((a, b) => a.plate.localeCompare(b.plate, 'th') || a.shop.localeCompare(b.shop, 'th'))
+    .map(group => `<tr><td>${escapeHtml(group.plate || '—')}</td><td>${escapeHtml(group.shop)}</td><td class="num">${group.pos.size}</td><td class="num">${group.count}</td><td class="num">${fmtNum(group.amount / 100)}</td></tr>`).join('');
+  const details = rows.map(row => `<tr><td>${escapeHtml(row.poNo)}<br>${escapeHtml(formatDate(row.issueDate))}<br>${escapeHtml(row.status)}</td><td>${escapeHtml(row.plate)}<br>${escapeHtml(row.refRepairNo)}</td><td>${escapeHtml(row.partName)}${row.note ? `<br><small>${escapeHtml(row.note)}</small>` : ''}</td><td>${escapeHtml(row.shopName)}</td><td class="num">${fmtNum(row.qty)} ${escapeHtml(row.unit)}</td><td class="num">${fmtNum(row.amount)}</td></tr>`).join('');
+  win.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>สรุปประวัติรายการ PO</title><style>
+    @page{size:A4 landscape;margin:12mm}body{font-family:Tahoma,sans-serif;color:#18354b;font-size:11px;margin:20px}h1{font-size:20px;margin:0 0 8px}h2{font-size:15px;margin:22px 0 8px}p{line-height:1.6}table{width:100%;border-collapse:collapse}th{background:#edf1f4;text-align:left}th,td{border-bottom:1px solid #d6dde2;padding:7px;vertical-align:top;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}.num{text-align:right;white-space:nowrap}.total{font-size:14px;font-weight:bold;padding:12px 0}small{color:#56616d}.print{padding:8px 16px;margin-bottom:18px}@media print{body{margin:0}.print{display:none}}
+    </style></head><body><button class="print" onclick="window.print()">พิมพ์ / บันทึก PDF</button><h1>สรุปค่าอะไหล่และงานซ่อมตามรายการ PO</h1><p>${escapeHtml(filters || 'ทุกช่วงวันที่ · ทุกทะเบียน · ทุกร้านค้า · ทุกสถานะ')}<br>ออกรายงาน: ${escapeHtml(new Date().toLocaleString('th-TH'))}</p><div class="total">${rows.length} รายการ · ${new Set(rows.map(row => row.poNo)).size} PO · ยอดรายการรวม ${fmtNum(total)} บาท</div><small>ยอดตามรายการหลังส่วนลด ตามเงื่อนไข VAT ของ PO แต่ละใบ ยังไม่บวก VAT นอก รายงานรวมทุกหน้าของผลค้นหา</small><h2>สรุปตามทะเบียนและร้านค้า</h2><table><thead><tr><th>ทะเบียน</th><th>ร้านค้า</th><th class="num">จำนวน PO</th><th class="num">จำนวนรายการ</th><th class="num">ยอดรวม (บาท)</th></tr></thead><tbody>${summary}</tbody></table><h2>รายละเอียดรายการ</h2><table><thead><tr><th>PO / วันที่ / สถานะ</th><th>ทะเบียน / Job</th><th>รายการ / หมายเหตุ</th><th>ร้านค้า</th><th class="num">จำนวน</th><th class="num">ยอดรายการ</th></tr></thead><tbody>${details}</tbody></table><div class="total num">รวม ${fmtNum(total)} บาท</div></body></html>`);
+  win.document.close();
+}
+
+function changePOHistoryPage(delta) { poHistoryPage += delta; renderPOHistory(); }
+
+function clearPOHistoryFilters() {
+  ['poHistoryQuery', 'poHistoryFrom', 'poHistoryTo', 'poHistoryPlate', 'poHistoryShop', 'poHistoryStatus'].forEach(id => { document.getElementById(id).value = ''; });
+  filterPOHistory();
+}
+
+function previewPOHistory(index) {
+  const row = poHistoryFiltered[index];
+  if (!row) return;
+  showLoading('กำลังเปิดรายละเอียด PO...');
+  google.script.run.withSuccessHandler(result => {
+    Swal.close();
+    currentPrintPONos = [row.poNo];
+    renderPrintPreview(result.po, result.items, result.settings, result.sigUrl);
+  }).withFailureHandler(error => { Swal.close(); showToast('error', error.message); }).getPOForPrint(row.poNo);
+}
 
 function showPOList() {
   document.getElementById('poListView').classList.remove('d-none');
