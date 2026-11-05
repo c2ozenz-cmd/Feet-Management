@@ -1,0 +1,44 @@
+<div id="inspection-list">
+  <div class="page-header"><div><h2 class="page-title"><i class="bi bi-clipboard-check me-2"></i>บันทึกตรวจรถ</h2><p class="page-subtitle">ความพร้อมก่อนออกงานและอุปกรณ์ประจำรถ</p></div>
+    <div class="d-flex gap-2 flex-wrap"><button class="btn btn-outline-secondary" onclick="InspectionUI.load(true)" title="รีเฟรช"><i class="bi bi-arrow-clockwise"></i></button><button class="btn btn-outline-secondary" onclick="InspectionUI.qrSheet()"><i class="bi bi-qr-code me-1"></i>QR ประจำรถ</button><button class="btn btn-primary" onclick="InspectionUI.newRecord()"><i class="bi bi-plus-lg me-1"></i>เพิ่มการตรวจ</button></div>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-12 col-md-4"><label class="form-label" for="vi-query">ค้นหาทะเบียน / คนขับ / ผู้ตรวจ / เส้นทาง</label><input id="vi-query" class="form-control" type="search" oninput="InspectionUI.filter()"></div>
+    <div class="col-6 col-md-3"><label class="form-label" for="vi-from">ตั้งแต่วันที่</label><input id="vi-from" type="date" class="form-control" onchange="InspectionUI.filter()"></div>
+    <div class="col-6 col-md-3"><label class="form-label" for="vi-to">ถึงวันที่</label><input id="vi-to" type="date" class="form-control" onchange="InspectionUI.filter()"></div>
+    <div class="col-12 col-md-2"><label class="form-label" for="vi-filter">สถานะ</label><select id="vi-filter" class="form-select" data-no-tomselect onchange="InspectionUI.filter()"><option value="">ทั้งหมด</option><option value="draft">แบบร่าง</option><option value="submitted">ส่งผลแล้ว</option><option value="issues">พบข้อบกพร่อง</option></select></div>
+  </div>
+  <div id="vi-count" class="text-muted mb-2" aria-live="polite"></div>
+  <div class="table-responsive"><table class="table table-hover align-middle"><thead><tr><th>เลขรายการ / วันเวลาตรวจ</th><th>ทะเบียน / เส้นทาง</th><th>คนขับ</th><th>เจ้าหน้าที่ตรวจ</th><th>ผลตรวจ</th><th></th></tr></thead><tbody id="vi-rows"></tbody></table></div>
+  <div class="d-flex align-items-center justify-content-between py-3"><span id="vi-page" class="small text-muted"></span><div class="d-flex gap-2"><button id="vi-prev" class="btn btn-sm btn-outline-secondary" onclick="InspectionUI.page(-1)" title="หน้าก่อนหน้า"><i class="bi bi-chevron-left"></i></button><button id="vi-next" class="btn btn-sm btn-outline-secondary" onclick="InspectionUI.page(1)" title="หน้าถัดไป"><i class="bi bi-chevron-right"></i></button></div></div>
+</div>
+<div id="inspection-form" class="d-none">
+  <div class="page-header"><div><h2 id="vi-title" class="page-title">ตรวจรถก่อนออกงาน</h2><div id="vi-state" class="text-muted small"></div></div><button class="btn btn-outline-secondary" onclick="InspectionUI.back()"><i class="bi bi-arrow-left me-1"></i>กลับ</button></div>
+  <form id="vi-form" novalidate onsubmit="event.preventDefault();InspectionUI.save('submitted')">
+    <details id="vi-trip-details" class="vi-trip" open><summary><i class="bi bi-bus-front me-2"></i>ข้อมูลรถและการเดินทาง<span id="vi-trip-label"></span></summary>
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-md-4"><label class="form-label" for="vi-plate">ทะเบียนรถ *</label><div class="input-group"><input id="vi-plate" class="form-control" list="vi-bus-list" autocomplete="off" required><button id="vi-scan" type="button" class="btn btn-outline-secondary" onclick="InspectionUI.scan()" title="สแกน QR"><i class="bi bi-qr-code-scan"></i></button></div><datalist id="vi-bus-list"></datalist></div>
+      <div class="col-6 col-md-4"><label class="form-label" for="vi-inspectedAt">วันเวลาตรวจ *</label><input id="vi-inspectedAt" type="datetime-local" class="form-control" required></div>
+      <div class="col-6 col-md-4"><label class="form-label" for="vi-odometer">เลขไมล์</label><input id="vi-odometer" type="number" min="0" step="1" class="form-control"></div>
+      <div class="col-12"><label class="form-label" for="vi-route">เส้นทาง *</label><input id="vi-route" class="form-control" maxlength="300" required></div>
+      <div class="col-12 col-md-6"><label class="form-label" for="vi-driver1">ชื่อคนขับ 1 *</label><input id="vi-driver1" class="form-control" maxlength="150" required></div>
+      <div class="col-12 col-md-6"><label class="form-label" for="vi-license1">เลขใบอนุญาตขับรถ คนที่ 1</label><input id="vi-license1" class="form-control" maxlength="100"></div>
+      <div class="col-12 col-md-6"><label class="form-label" for="vi-driver2">ชื่อคนขับ 2</label><input id="vi-driver2" class="form-control" maxlength="150"></div>
+      <div class="col-12 col-md-6"><label class="form-label" for="vi-license2">เลขใบอนุญาตขับรถ คนที่ 2</label><input id="vi-license2" class="form-control" maxlength="100"></div>
+      <div class="col-12 col-md-4"><label class="form-label" for="vi-assistant">ผู้ช่วยพนักงานขับรถ</label><input id="vi-assistant" class="form-control" maxlength="150"></div>
+      <div class="col-12 col-md-4"><label class="form-label" for="vi-inspector">เจ้าหน้าที่ตรวจ *</label><input id="vi-inspector" class="form-control" maxlength="150" required></div>
+      <div class="col-12 col-md-4"><label class="form-label" for="vi-supervisor">ผู้ควบคุมการตรวจ</label><input id="vi-supervisor" class="form-control" maxlength="150"></div>
+    </div>
+    <button type="button" class="btn btn-outline-primary mb-3" onclick="InspectionUI.nextUnchecked(true)"><i class="bi bi-arrow-down-circle me-1"></i>เริ่มตรวจรถ</button></details>
+    <div class="vi-progress"><div class="vi-progress-top"><span id="vi-progress-text" aria-live="polite"></span><button type="button" class="btn btn-sm btn-outline-primary" onclick="InspectionUI.nextUnchecked()" title="ไปข้อที่ยังไม่ตรวจ"><i class="bi bi-skip-forward me-1"></i>ข้อถัดไป</button></div><progress id="vi-progress-bar" value="0" max="100"></progress>
+      <div class="vi-result-filter" role="group" aria-label="กรองข้อที่ตรวจ"><button type="button" class="active" aria-pressed="true" data-mode="all" onclick="InspectionUI.filterChecks('all')">ทั้งหมด</button><button type="button" aria-pressed="false" data-mode="pending" onclick="InspectionUI.filterChecks('pending')">ยังไม่ตรวจ</button><button type="button" aria-pressed="false" data-mode="fail" onclick="InspectionUI.filterChecks('fail')">ไม่ผ่าน</button></div>
+    </div>
+    <div id="vi-checklist"></div>
+    <div id="vi-check-empty" class="text-center text-muted py-4 d-none" aria-live="polite"></div>
+    <section class="vi-section"><h3>สภาพรอบคันและรูปแนบ</h3><div class="d-flex flex-wrap gap-2 align-items-end"><div><label class="form-label" for="vi-photo-target">ตำแหน่ง / รายการ</label><select id="vi-photo-target" class="form-select" data-no-tomselect><option value="front">ด้านหน้า</option><option value="back">ด้านหลัง</option><option value="left">ด้านซ้าย</option><option value="right">ด้านขวา</option><option value="general">ทั่วไป</option></select></div><label class="btn btn-outline-primary mb-0" id="vi-photo-button"><i class="bi bi-camera me-1"></i>แนบรูป<input id="vi-photo" type="file" accept="image/jpeg,image/png" class="visually-hidden" onchange="InspectionUI.photo(this)"></label></div><div id="vi-photos" class="vi-photos mt-3"></div></section>
+    <section class="vi-section"><label class="form-label" for="vi-notes">หมายเหตุเพิ่มเติม</label><textarea id="vi-notes" class="form-control" rows="3" maxlength="2000"></textarea></section>
+    <section class="vi-section"><h3>ลายเซ็น</h3><div id="vi-signatures" class="row g-3"></div></section>
+    <div id="vi-save-actions" class="vi-actions"><button type="button" class="btn btn-outline-secondary" onclick="InspectionUI.save('draft')"><i class="bi bi-save me-1"></i>บันทึกแบบร่าง</button><button type="submit" class="btn btn-primary"><i class="bi bi-check2-circle me-1"></i>ส่งผลตรวจ</button></div>
+    <div class="d-flex justify-content-end py-3"><button type="button" class="btn btn-outline-secondary" onclick="InspectionUI.print()"><i class="bi bi-printer me-1"></i>พิมพ์ / PDF</button></div>
+  </form>
+</div>

@@ -485,7 +485,7 @@
     // ── COMPANY SETTINGS ──
     async getAllSettings() {
       try {
-        const { data, error } = await supabase.from('settings').select('*');
+        const { data, error } = await supabase.from('settings').select('*').not('key', 'like', 'vehicle_inspection:%');
         if (error) throw error;
         // Map settings rows to array of key-value objects
         const mapped = (data || []).map(s => ({ key: s.key, value: s.value }));
@@ -516,7 +516,7 @@
         const nextKeys = new Set(upserts.map(item => item.key));
         const keysToDelete = (existingRows || [])
           .map(row => row.key)
-          .filter(key => key && !nextKeys.has(key));
+          .filter(key => key && !key.startsWith('vehicle_inspection:') && !nextKeys.has(key));
 
         if (keysToDelete.length) {
           const { error: deleteError } = await supabase.from('settings').delete().in('key', keysToDelete);
@@ -944,7 +944,7 @@
         const [poRes, itemsRes, settingsRes] = await Promise.all([
           supabase.from('purchase_orders').select('*').eq('po_no', poNo).single(),
           supabase.from('po_items').select('*').eq('po_no', poNo),
-          supabase.from('settings').select('*')
+          supabase.from('settings').select('*').not('key', 'like', 'vehicle_inspection:%')
         ]);
 
         if (poRes.error || !poRes.data) throw new Error('PO not found: ' + (poRes.error?.message || poNo));

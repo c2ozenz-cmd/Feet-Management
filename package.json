@@ -9,10 +9,13 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",
+    "dotenv": "^16.4.5",
+    "html5-qrcode": "^2.3.8",
+    "node-fetch": "^2.7.0",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.15.0",
-    "node-fetch": "^2.7.0",
-    "dotenv": "^16.4.5"
+    "qrcode": "^1.5.4",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "netlify-cli": "^17.19.1"

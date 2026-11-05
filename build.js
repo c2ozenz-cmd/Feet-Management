@@ -25,6 +25,8 @@ function copyDir(src, dest) {
 }
 
 copyDir(PDFKIT_DATA_SRC, PDFKIT_DATA_DEST);
+fs.mkdirSync(path.join(PUBLIC_DIR, 'vendor'), { recursive: true });
+fs.copyFileSync(path.join(__dirname, 'node_modules/html5-qrcode/html5-qrcode.min.js'), path.join(PUBLIC_DIR, 'vendor/html5-qrcode.min.js'));
 
 // 1. Read entrypoint Index.html
 let indexContent = fs.readFileSync('Index.html', 'utf8');

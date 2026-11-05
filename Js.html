@@ -299,7 +299,7 @@ function initApp() {
     document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
   }
 
-  navigateTo('dashboard');
+  navigateTo(new URLSearchParams(location.search).has('inspectionPlate') ? 'inspections' : 'dashboard');
   loadNotifications(); 
   hydrateCurrentUserSignature();
   setTimeout(() => initTomSelects(), 0);
@@ -338,7 +338,12 @@ function logout() {
 
 // ── NAVIGATION ──
 function navigateTo(page) {
+  if (typeof InspectionUI !== 'undefined' && currentPageName === 'inspections' && page !== 'inspections') {
+    if (!InspectionUI.canLeave()) return;
+  }
   currentPageName = page;
+  document.body.classList.toggle('inspection-active',page==='inspections');
+  if(page!=='inspections')document.body.classList.remove('inspection-editing');
   if (typeof toggleQuickActions === 'function') toggleQuickActions(true);
   document.querySelectorAll('[id^=page-]').forEach(el => el.classList.add('d-none'));
   document.querySelectorAll('.sidebar-nav-item').forEach(el => el.classList.remove('active'));
@@ -356,6 +361,7 @@ function navigateTo(page) {
   switch (page) {
     case 'dashboard': loadDashboard(); break;
     case 'repairs': loadRepairs(); break;
+    case 'inspections': InspectionUI.load(); break;
     case 'po': loadPOs(); break;
     case 'stock': loadStock(); break;
     case 'shops': loadShops(); break;
@@ -4520,6 +4526,7 @@ const SYSTEM_SETTING_PREFIXES = [
   'pending_report:',
   'po_approval:',
   'po_trash:',
+  'vehicle_inspection:',
   'po_notify:',
   'user_permissions:'
 ];

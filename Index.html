@@ -69,6 +69,7 @@
       <!-- Pages injected here -->
       <div id="page-dashboard"><?!= include('page_dashboard'); ?></div>
       <div id="page-repairs" class="d-none"><?!= include('page_repairs'); ?></div>
+      <div id="page-inspections" class="d-none"><?!= include('page_inspections'); ?></div>
       <div id="page-po" class="d-none"><?!= include('page_po'); ?></div>
       <div id="page-stock" class="d-none"><?!= include('page_stock'); ?></div>
       <div id="page-shops" class="d-none"><?!= include('page_shops'); ?></div>
@@ -133,7 +134,10 @@
 <!-- Tom Select -->
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 
+<script src="inspection-model.js"></script>
+<script src="inspection-print.js"></script>
+<script src="vendor/html5-qrcode.min.js"></script>
+<script src="inspections.js"></script>
 <?!= include('Js'); ?>
-
 </body>
 </html>

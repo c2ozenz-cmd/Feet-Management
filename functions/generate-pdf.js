@@ -3,6 +3,7 @@ const fetch = require('node-fetch');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
+const { optimizePDFImage } = require('./lib/pdf-image-optimizer');
 const POItemContext = require('../public/po-item-context');
 
 // Initialize Supabase
@@ -35,7 +36,7 @@ exports.handler = async (event, context) => {
     }
 
     // 3. Fetch Settings
-    const { data: settingsArr } = await supabase.from('settings').select('*');
+    const { data: settingsArr } = await supabase.from('settings').select('*').not('key', 'like', 'vehicle_inspection:%');
     const settings = {};
     (settingsArr || []).forEach(s => { settings[s.key] = s.value; });
 
@@ -235,7 +236,7 @@ async function fetchImageBuffer(url, label) {
         console.warn(`Failed to load ${label}: response is not an image`);
         continue;
       }
-      return buffer;
+      return await optimizePDFImage(buffer, label);
     } catch (err) {
       console.warn(`Failed to load ${label}:`, err.message);
     }
@@ -318,7 +319,11 @@ function calculatePOTotals(items, vatType = 'none') {
 function fitImage(doc, buffer, x, y, width, height, options = {}) {
   if (!buffer) return false;
   try {
-    doc.image(buffer, x, y, { fit: [width, height], align: options.align || 'center', valign: options.valign || 'center' });
+    // Reuse the same PDF image object on every page instead of embedding the buffer again.
+    if (!doc._fleetImageCache) doc._fleetImageCache = new Map();
+    let image = doc._fleetImageCache.get(buffer);
+    if (!image) { image = doc.openImage(buffer); doc._fleetImageCache.set(buffer, image); }
+    doc.image(image, x, y, { fit: [width, height], align: options.align || 'center', valign: options.valign || 'center' });
     return true;
   } catch (err) {
     console.warn('Failed to draw image:', err.message);

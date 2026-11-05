@@ -3,6 +3,8 @@ node_modules/
 .netlify/
 dist/
 public/index.html
+backups/
+public/vendor/html5-qrcode.min.js
 functions/data/
 
 # Local environment variables
