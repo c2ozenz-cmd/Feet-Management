@@ -5,7 +5,14 @@
   "main": "index.js",
   "scripts": {
     "dev": "node build.js && netlify dev",
-    "local": "node run-local.js"
+    "local": "node run-local.js",
+    "local:oil": "node run-maintenance-demo.js",
+    "local:oil-api": "node run-oil-api-demo.js",
+    "test:oil": "node tests/oil-tracking.test.js",
+    "test:oil-mileage": "node tests/oil-current-mileage.test.js",
+    "test:oil-repairs": "node tests/oil-repair-history.test.js",
+    "test:oil-data": "node tests/oil-tracking-data.test.js",
+    "test:oil-api": "node tests/oil-tracking-api.test.js && node tests/oil-tracking-api-http.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",

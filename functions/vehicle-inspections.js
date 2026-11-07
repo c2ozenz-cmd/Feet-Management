@@ -59,7 +59,7 @@ function createHandler(db) {
       const found = await load(body.id);
       if (found && !canEdit(found.record, actor)) return json(403, { success: false, message: 'แบบตรวจส่งผลแล้ว หรือคุณไม่ใช่เจ้าของแบบร่าง' });
       if (body.action === 'upload') {
-        const allowedTargets = [...model.template.map(item => item.id), 'front', 'back', 'left', 'right', 'general', 'signature-driver', 'signature-inspector', 'signature-supervisor'];
+        const allowedTargets = [...model.getTemplate(found ? (found.record.templateVersion || 'daily-v1') : body.templateVersion).map(item => item.id), 'front', 'back', 'left', 'right', 'general', 'signature-driver', 'signature-inspector', 'signature-supervisor'];
         if (!allowedTargets.includes(body.target)) throw new Error('ตำแหน่งรูปไม่ถูกต้อง');
         const buffer = Buffer.from(String(body.base64 || ''), 'base64');
         const png = buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
@@ -79,7 +79,7 @@ function createHandler(db) {
       if (body.action !== 'save') throw new Error('คำสั่งไม่ถูกต้อง');
       if (found && found.record.revision !== body.revision) return json(409, { success: false, message: 'มีการแก้ไขจากอีกหน้าจอ กรุณาเปิดแบบตรวจใหม่' });
       if (!['draft', 'submitted'].includes(body.state)) throw new Error('สถานะไม่ถูกต้อง');
-      const normalized = model.normalize(body.record || {}, body.state === 'submitted');
+      const normalized = model.normalize({ ...body.record, templateVersion: found ? (found.record.templateVersion || 'daily-v1') : body.record?.templateVersion }, body.state === 'submitted');
       if (normalized.plate) {
         const result = await db.from('buses').select('plate').eq('plate', normalized.plate).maybeSingle();
         if (result.error || !result.data) throw new Error('กรุณาเลือกทะเบียนที่มีอยู่ในระบบ');

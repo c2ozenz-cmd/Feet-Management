@@ -1,235 +1,53 @@
-<div class="page-header">
-  <div>
-    <h2 class="page-title"><i class="bi bi-speedometer2 me-2 text-primary" style="color:var(--claude-primary)!important"></i>แดชบอร์ด</h2>
-    <p class="page-subtitle">ภาพรวมระบบแจ้งซ่อมรถบัส</p>
-  </div>
-  <div class="text-muted small" id="dashDatetime"></div>
-</div>
+<div class="dash-v2" id="dashboard-workspace">
+  <header class="dash-header">
+    <div><div class="dash-eyebrow"><i class="bi bi-speedometer2" aria-hidden="true"></i> FEET MANAGEMENT</div><h2>ภาพรวมการดูแลรถ</h2><p id="dashDatetime"></p></div>
+    <div class="dash-header-actions"><span id="dashUpdated" aria-live="polite">กำลังอ่านข้อมูล...</span><button class="dash-button" id="dashRefresh" onclick="DashboardUI.load(true)"><i class="bi bi-arrow-clockwise"></i> รีเฟรช</button><button class="dash-button dash-primary" onclick="quickNewRepair()"><i class="bi bi-plus-lg"></i> แจ้งซ่อม</button></div>
+  </header>
 
-<!-- Stat Cards — เน้น actionable -->
-<div class="mobile-task-hub card mb-3">
-  <div class="card-header">
-    <div class="card-icon"><i class="bi bi-lightning-charge"></i></div>
-    งานที่ใช้บ่อย
-  </div>
-  <div class="card-body">
-    <div class="task-hub-grid">
-      <button class="task-hub-btn" onclick="quickNewRepair()">
-        <i class="bi bi-tools"></i>
-        <span>แจ้งซ่อมใหม่</span>
-      </button>
-      <button class="task-hub-btn admin-only" onclick="quickNewPO()">
-        <i class="bi bi-file-earmark-plus"></i>
-        <span>สร้าง PO</span>
-      </button>
-      <button class="task-hub-btn" onclick="quickDeductStock()">
-        <i class="bi bi-scissors"></i>
-        <span>ตัด Stock</span>
-      </button>
-      <button class="task-hub-btn" onclick="quickOpenSummaryMonth()">
-        <i class="bi bi-calendar-month"></i>
-        <span>สรุปเดือนนี้</span>
-      </button>
-    </div>
-  </div>
-</div>
-
-<div class="row g-3 mb-4">
-  <div class="col-6 col-xl-3">
-    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
-      <div class="stat-icon yellow"><i class="bi bi-clock"></i></div>
-      <div>
-        <div class="stat-value" id="dashWaiting">—</div>
-        <div class="stat-label">รอดำเนินการ</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
-      <div class="stat-icon orange"><i class="bi bi-gear"></i></div>
-      <div>
-        <div class="stat-value" id="dashInProgress">—</div>
-        <div class="stat-label">กำลังซ่อม</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('repairs')">
-      <div class="stat-icon blue"><i class="bi bi-box-seam"></i></div>
-      <div>
-        <div class="stat-value" id="dashWaitingParts">—</div>
-        <div class="stat-label">รออะไหล่</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card" style="cursor:pointer" onclick="navigateTo('po')">
-      <div class="stat-icon green"><i class="bi bi-file-earmark-check"></i></div>
-      <div>
-        <div class="stat-value" id="dashPOPending">—</div>
-        <div class="stat-label">PO รออนุมัติ</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="row g-3">
-  <!-- รายการซ่อมที่ค้างอยู่ (ไม่เสร็จ) -->
-  <div class="col-lg-7">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-icon"><i class="bi bi-list-task"></i></div>
-        งานค้างอยู่
-        <span class="badge rounded-pill ms-2"
-          style="background:rgba(217,119,87,0.15);color:var(--claude-primary);font-size:11px"
-          id="dashPendingCount">0</span>
-      </div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-hover mb-0">
-            <thead>
-              <tr>
-                <th>เลขที่</th>
-                <th>ทะเบียน</th>
-                <th>สถานะ</th>
-                <th>วันที่</th>
-              </tr>
-            </thead>
-            <tbody id="dashRecentRepairs">
-              <tr><td colspan="4" class="text-center text-muted py-4">กำลังโหลด...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+  <div class="dash-overview" aria-label="รายการที่ต้องติดตาม">
+    <button class="dash-kpi" data-dash-page="repairs" data-status="pending" disabled id="dashRepairMetric"><span class="dash-kpi-label"><i class="bi bi-tools"></i> งานซ่อมค้าง</span><strong id="dashPendingTotal">—</strong><span class="dash-kpi-foot">เปิดดูใบงาน <i class="bi bi-arrow-up-right"></i></span></button>
+    <button class="dash-kpi" data-dash-page="po" data-status="รออนุมัติ" disabled id="dashPOMetric"><span class="dash-kpi-label"><i class="bi bi-file-earmark-text"></i> PO รออนุมัติ</span><strong id="dashPOPending">—</strong><span class="dash-kpi-foot">ตรวจสอบการจัดซื้อ <i class="bi bi-arrow-up-right"></i></span></button>
+    <button class="dash-kpi dash-kpi-danger" data-dash-oil="due" disabled id="dashOilMetric"><span class="dash-kpi-label"><i class="bi bi-droplet"></i> เปลี่ยนถ่ายครบกำหนด</span><strong id="dashOilDue">—</strong><span class="dash-kpi-foot" id="dashOilNear">ใกล้ครบ — คัน <i class="bi bi-arrow-up-right"></i></span></button>
+    <button class="dash-kpi dash-kpi-warning" data-dash-page="stock" data-status="out" disabled id="dashStockMetric"><span class="dash-kpi-label"><i class="bi bi-box-seam"></i> อะไหล่หมด</span><strong id="dashStockOut">—</strong><span class="dash-kpi-foot" id="dashStockLowCount">ใกล้หมด — รายการ <i class="bi bi-arrow-up-right"></i></span></button>
   </div>
 
-  <div class="col-lg-5 d-flex flex-column gap-3">
-    <!-- อะไหล่ใกล้หมด -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-icon"
-          style="background:rgba(192,80,80,0.12);color:var(--claude-danger)">
-          <i class="bi bi-exclamation-triangle"></i>
-        </div>
-        อะไหล่ใกล้หมด / หมดแล้ว
+  <div class="dash-workspace">
+    <section class="dash-panel dash-repairs" aria-labelledby="dashRepairTitle">
+      <div class="dash-panel-header"><div><h3 id="dashRepairTitle"><i class="bi bi-tools"></i> งานซ่อมที่ต้องติดตาม <span id="dashPendingCount" class="dash-count">—</span></h3><p>เรียงจากใบงานที่เปิดไว้นานที่สุด</p></div><button class="dash-icon-button" data-dash-page="repairs" title="ดูงานซ่อมทั้งหมด" aria-label="ดูงานซ่อมทั้งหมด"><i class="bi bi-arrow-up-right"></i></button></div>
+      <div class="dash-status-nav">
+        <button data-dash-page="repairs" data-status="รอดำเนินการ">รอดำเนินการ <b id="dashWaiting">—</b></button>
+        <button data-dash-page="repairs" data-status="กำลังซ่อม">กำลังซ่อม <b id="dashInProgress">—</b></button>
+        <button data-dash-page="repairs" data-status="รออะไหล่">รออะไหล่ <b id="dashWaitingParts">—</b></button>
       </div>
-      <div class="card-body p-0">
-        <div id="dashLowStock" class="p-3">
-          <div class="text-center text-muted py-2">กำลังโหลด...</div>
-        </div>
-      </div>
-    </div>
+      <div id="dashRepairError" role="status"></div>
+      <div class="dash-repair-table-wrap"><table class="dash-repair-table"><thead><tr><th>ใบงาน / วันที่</th><th>รถ / รายการซ่อม</th><th>สถานะ</th><th></th></tr></thead><tbody id="dashRecentRepairs"><tr><td colspan="4" class="dash-empty">กำลังโหลด...</td></tr></tbody></table></div>
+      <button class="dash-footer-link" data-dash-page="repairs">ดูใบงานทั้งหมด <i class="bi bi-arrow-right"></i></button>
+    </section>
 
-    <!-- รถใกล้หมดอายุ (ใหม่) -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-icon"
-          style="background:rgba(212,160,68,0.12);color:var(--claude-warning)">
-          <i class="bi bi-calendar-x"></i>
-        </div>
-        ทะเบียน / ประกันใกล้หมดอายุ
-      </div>
-      <div class="card-body p-0">
-        <div id="dashExpiryAlert" class="p-3">
-          <div class="text-center text-muted py-2">กำลังโหลด...</div>
-        </div>
-      </div>
-    </div>
-</div>
-</div>
+    <section id="dash-oil" class="ot ot-dash dash-panel dash-oil" aria-label="สรุปเปลี่ยนถ่ายน้ำมันเครื่อง"></section>
 
-<!-- ── Weekly Summary Widget ── -->
-<div class="row g-3 mt-3">
-  <div class="col-12">
-    <div class="card">
+    <section class="dash-panel dash-po" aria-labelledby="dashPOTitle">
+      <div class="dash-panel-header"><div><h3 id="dashPOTitle"><i class="bi bi-file-earmark-text"></i> ใบสั่งซื้อรออนุมัติ</h3><p id="dashPOTotal">กำลังโหลด...</p></div><button class="dash-icon-button" data-dash-page="po" data-status="รออนุมัติ" title="ดู PO รออนุมัติ" aria-label="ดู PO รออนุมัติ"><i class="bi bi-arrow-up-right"></i></button></div>
+      <div id="dashPOList"></div>
+    </section>
 
-      <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-2">
-          <div class="card-icon"><i class="bi bi-calendar-week"></i></div>
-          <div>
-            <div style="font-weight:600;color:var(--claude-secondary)">สรุปรายสัปดาห์</div>
-            <div class="text-muted" style="font-size:12px" id="weeklyLabel">กำลังโหลด...</div>
-          </div>
-        </div>
-        <div class="d-flex align-items-center gap-2">
-          <button class="btn btn-sm btn-outline-secondary" onclick="shiftWeek(-1)" title="สัปดาห์ก่อน">
-            <i class="bi bi-chevron-left"></i>
-          </button>
-          <button class="btn btn-sm btn-outline-secondary" onclick="shiftWeek(0)" title="สัปดาห์นี้">
-            <i class="bi bi-circle"></i>
-          </button>
-          <button class="btn btn-sm btn-outline-secondary" id="weekNextBtn"
-            onclick="shiftWeek(1)" title="สัปดาห์ถัดไป" disabled>
-            <i class="bi bi-chevron-right"></i>
-          </button>
-          <button class="btn btn-sm btn-outline-primary" onclick="openWeeklyModal()">
-            <i class="bi bi-list-ul me-1"></i>รายละเอียด
-          </button>
-        </div>
-      </div>
+    <section class="dash-panel dash-weekly" aria-labelledby="dashWeekTitle">
+      <div class="dash-panel-header"><div><h3 id="dashWeekTitle"><i class="bi bi-calendar-week"></i> ภาพรวมรายสัปดาห์</h3><p id="weeklyLabel">กำลังโหลด...</p></div><div class="dash-week-controls">
+        <button class="dash-icon-button" onclick="shiftWeek(-1)" title="สัปดาห์ก่อน" aria-label="สัปดาห์ก่อน"><i class="bi bi-chevron-left"></i></button><button class="dash-icon-button" onclick="shiftWeek(0)" title="สัปดาห์นี้" aria-label="สัปดาห์นี้"><i class="bi bi-calendar-event"></i></button><button class="dash-icon-button" id="weekNextBtn" onclick="shiftWeek(1)" title="สัปดาห์ถัดไป" aria-label="สัปดาห์ถัดไป" disabled><i class="bi bi-chevron-right"></i></button>
+      </div></div>
+      <div class="dash-week-stats"><div><strong id="wkOpened">—</strong><span>เปิดใหม่</span></div><div><strong id="wkDone">—</strong><span>ปิดงานแล้ว</span></div><div><strong id="wkPending">—</strong><span>ยังไม่เสร็จ</span></div><div><strong id="wkCarry">—</strong><span>ค้างข้ามสัปดาห์</span></div></div>
+      <div id="weeklyExtra" class="dash-week-extra" style="display:none"><div><h4>รถที่มีใบงานมากที่สุด</h4><div id="wkTopPlates"></div></div><div><h4>งานค้างตามสถานะ</h4><div id="wkByStatus"></div></div></div>
+      <button class="dash-footer-link" onclick="openWeeklyModal()">รายละเอียดงานค้างประจำสัปดาห์ <i class="bi bi-arrow-right"></i></button>
+    </section>
+  </div>
 
-      <div class="card-body">
-        <!-- 4 stat cards -->
-        <div class="row g-3">
-          <div class="col-6 col-md-3">
-            <div class="stat-card">
-              <div class="stat-icon orange"><i class="bi bi-plus-circle"></i></div>
-              <div>
-                <div class="stat-value" id="wkOpened">—</div>
-                <div class="stat-label">เปิดงานใหม่</div>
-              </div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="stat-card">
-              <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
-              <div>
-                <div class="stat-value" id="wkDone">—</div>
-                <div class="stat-label">ปิดงานสำเร็จ</div>
-              </div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="stat-card">
-              <div class="stat-icon yellow"><i class="bi bi-hourglass-split"></i></div>
-              <div>
-                <div class="stat-value" id="wkPending">—</div>
-                <div class="stat-label">งานค้างทั้งหมด</div>
-              </div>
-            </div>
-          </div>
-          <div class="col-6 col-md-3">
-            <div class="stat-card">
-              <div class="stat-icon blue"><i class="bi bi-arrow-left-right"></i></div>
-              <div>
-                <div class="stat-value" id="wkCarry">—</div>
-                <div class="stat-label">ค้างข้ามสัปดาห์</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Top plates + By status -->
-        <div class="row g-3 mt-1" id="weeklyExtra" style="display:none">
-          <div class="col-12 col-md-6">
-            <div style="font-size:12px;font-weight:600;color:var(--claude-text-muted);
-                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
-              รถซ่อมบ่อยสุด (สัปดาห์นี้)
-            </div>
-            <div id="wkTopPlates">—</div>
-          </div>
-          <div class="col-12 col-md-6">
-            <div style="font-size:12px;font-weight:600;color:var(--claude-text-muted);
-                        text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
-              งานค้างแยกตามสถานะ
-            </div>
-            <div id="wkByStatus">—</div>
-          </div>
-        </div>
-      </div>
-
-    </div>
+  <div class="dash-resources">
+    <section class="dash-panel" aria-labelledby="dashStockTitle">
+      <div class="dash-panel-header"><div><h3 id="dashStockTitle"><i class="bi bi-box-seam"></i> อะไหล่ที่ต้องเติม</h3><p>หมดสต็อกและต่ำกว่าจุดสั่งซื้อ</p></div><button class="dash-icon-button" data-dash-page="stock" aria-label="เปิดคลังอะไหล่" title="เปิดคลังอะไหล่"><i class="bi bi-arrow-up-right"></i></button></div><div id="dashLowStock"></div>
+    </section>
+    <section class="dash-panel" aria-labelledby="dashExpiryTitle">
+      <div class="dash-panel-header"><div><h3 id="dashExpiryTitle"><i class="bi bi-calendar2-exclamation"></i> ทะเบียนและประกันรถ</h3><p>หมดอายุหรือเหลือไม่เกิน 60 วัน</p></div><button class="dash-icon-button" data-dash-page="buses" aria-label="เปิดทะเบียนรถ" title="เปิดทะเบียนรถ"><i class="bi bi-arrow-up-right"></i></button></div><div id="dashExpiryAlert"></div>
+    </section>
   </div>
 </div>
 

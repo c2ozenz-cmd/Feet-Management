@@ -110,7 +110,12 @@ async function handleNetlifyFunction(req, res, pathname, queryStringParameters) 
       Promise.resolve().then(() => mod.handler(event)).catch(error => console.error('Local background:', error.message));
       return;
     }
-    const result = await mod.handler(event);
+    let result;
+    if (name === 'oil-current-mileage') {
+      result = await mod.createLocalHandler(rootDir)(event);
+    } else {
+      result = await mod.handler(event);
+    }
 
     res.writeHead(result.statusCode || 200, result.headers || { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(result.body || '');

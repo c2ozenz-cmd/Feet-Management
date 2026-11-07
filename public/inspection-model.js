@@ -2,7 +2,7 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.InspectionModel = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
-  const version = 'daily-v1';
+  const version = 'daily-v2';
   const sections = [
     ['พนักงานขับรถ', ['สมุดประจำรถ', 'ตรวจวัดระดับแอลกอฮอล์ในลมหายใจ', 'การแต่งกาย', 'ชั่วโมงการทำงาน']],
     ['เครื่องยนต์และมาตรวัด', ['สภาพเครื่องยนต์และมลภาวะ', 'ระบบส่งกำลังและเกียร์', 'ระดับน้ำมันเครื่องและน้ำหล่อเย็น', 'ไฟเตือนที่แผงหน้าปัด']],
@@ -17,15 +17,36 @@
     ['สภาพภายนอกและเบรก', ['ยางทุกเส้นและทุกเพลา', 'เบรกเพลาหน้า เพลาขับเคลื่อน และล้อประคอง', 'ระบบเบรก ABS']]
   ];
   const optionalLabels = new Set(['กล้องถอยหลัง', 'ที่นอนพนักงานขับรถ', 'ไฟห้องน้ำ', 'ปล่องแอร์', 'พัดลมตัวดูด', 'กระติกน้ำร้อนและถังน้ำแข็ง']);
-  const template = sections.flatMap(([group, labels], groupIndex) => labels.map((label, index) => ({
+  const legacyTemplate = sections.flatMap(([group, labels], groupIndex) => labels.map((label, index) => ({
     id: `g${groupIndex + 1}-${index + 1}`, group, label,
     optional: group === 'ห้องน้ำ' || optionalLabels.has(label),
     count: /ค้อนทุบกระจก|ถังดับเพลิง/.test(label)
   })));
+  // Stable IDs and the original template preserve answers in saved v1 inspections.
+  const removed = new Set(['g6-6', 'g7-4', 'g10-4', 'g10-5', 'g10-6', 'g10-14', 'g11-1']);
+  const labels = {
+    'g1-1': 'มีสมุดประจำรถและจดบันทึกครบถ้วน',
+    'g6-2': 'เข็มขัดนิรภัยทุกที่นั่งครบและพร้อมใช้งาน',
+    'g6-3': 'ค้อนทุบกระจกครบตามตำแหน่งทุกชั้นรถและพร้อมใช้งาน',
+    'g6-4': 'ถังดับเพลิงครบตามตำแหน่งทุกชั้นรถและพร้อมใช้งาน',
+    'g6-5': 'ติดตั้ง GPS Tracking และระบบพร้อมใช้งาน',
+    'g8-1': 'ยางทุกเส้นทุกเพลา: ร่องดอกยางลึกไม่น้อยกว่า 1.6 มม. (ตามแบบตรวจ)',
+    'g8-2': 'ยางทุกเส้นทุกเพลา: ไม่มีรอยฉีกขาด บวม นูน',
+    'g8-3': 'ยางทุกเส้นทุกเพลา: แรงดันลมอยู่ในระดับมาตรฐาน',
+    'g9-5': 'ไฟส่องสว่างห้องน้ำและไฟกริ่งพร้อมใช้งาน'
+  };
+  const template = legacyTemplate.filter(item => !removed.has(item.id)).map(item => ({ ...item, label: labels[item.id] || item.label }));
+  function getTemplate(templateVersion = version) {
+    if (templateVersion === 'daily-v1') return legacyTemplate;
+    if (templateVersion === version) return template;
+    throw new Error('รุ่นแบบตรวจไม่ถูกต้อง กรุณาโหลดหน้าใหม่');
+  }
   function normalize(input, submit = false) {
+    const templateVersion = input.templateVersion || version;
+    const activeTemplate = getTemplate(templateVersion);
     const text = (value, limit = 500) => String(value || '').trim().slice(0, limit);
     const answers = {};
-    for (const item of template) {
+    for (const item of activeTemplate) {
       const answer = input.answers?.[item.id] || {};
       const status = ['pass', 'fail', 'na'].includes(answer.status) ? answer.status : '';
       if (status === 'na' && !item.optional) throw new Error(`ไม่สามารถข้าม: ${item.label}`);
@@ -37,7 +58,7 @@
       if (submit && item.count && status !== 'na' && count === null) throw new Error(`กรุณาระบุจำนวน: ${item.label}`);
       answers[item.id] = { status, note, count: item.count ? count : null };
     }
-    const record = { templateVersion: version, template, answers,
+    const record = { templateVersion, template: activeTemplate, answers,
       plate: text(input.plate, 100), inspectedAt: text(input.inspectedAt, 40), route: text(input.route, 300),
       driver1: text(input.driver1, 150), driver2: text(input.driver2, 150), license1: text(input.license1, 100), license2: text(input.license2, 100),
       assistant: text(input.assistant, 150), inspector: text(input.inspector, 150), supervisor: text(input.supervisor, 150), notes: text(input.notes, 2000),
@@ -50,7 +71,7 @@
   }
   function summary(record) {
     const values = Object.values(record.answers || {});
-    return { total: (record.template || template).length, checked: values.filter(answer => answer.status).length,
+    return { total: (record.template || getTemplate(record.templateVersion)).length, checked: values.filter(answer => answer.status).length,
       failed: values.filter(answer => answer.status === 'fail').length, skipped: values.filter(answer => answer.status === 'na').length };
   }
   function qrPlate(value, plates) {
@@ -59,5 +80,5 @@
     if (!plates.includes(plate)) throw new Error('ไม่พบทะเบียนจาก QR ในทะเบียนรถของระบบ');
     return plate;
   }
-  return { version, template, normalize, summary, qrPlate };
+  return { version, template, getTemplate, normalize, summary, qrPlate };
 });

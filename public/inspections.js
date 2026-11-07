@@ -168,7 +168,7 @@ const InspectionUI = (() => {
   }
   async function upload(dataURL,target) {
     if ((current.attachments||[]).length>=20) throw new Error('แนบรูปและลายเซ็นได้ไม่เกิน 20 รูป');
-    const result=await api('POST',{}, {action:'upload',id:current.id,target,base64:dataURL.split(',')[1]});
+    const result=await api('POST',{}, {action:'upload',id:current.id,templateVersion:current.templateVersion,target,base64:dataURL.split(',')[1]});
     if(target.startsWith('signature-')) current.attachments=current.attachments.filter(item=>item.target!==target);
     current.attachments.push(result.attachment); changed();
   }

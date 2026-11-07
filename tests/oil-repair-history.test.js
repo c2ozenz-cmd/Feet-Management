@@ -1,0 +1,30 @@
+const assert=require('node:assert/strict');
+const {assemble}=require('../functions/lib/oil-current-mileage');
+const {enrich}=require('../functions/lib/oil-repair-history');
+const date='2026-11-06';
+const repair=(change={})=>({repair_no:'REP-2',date:'2026-08-01',plate:'30-1001 สข',mileage:100000,oil_program:'S',repair_list:'เปลี่ยนถ่ายน้ำมันเครื่องโปรแกรม S',repair_summary:'',status:'เสร็จแล้ว',...change});
+function base(p='30-1001 สข',type='รถบัสปรับอากาศ 1 ชั้น 40 ที่นั่ง',odom=110000) {
+  return assemble([{plate:p}],[{plate_no:p,vehicle_type:type}],[{row_id:1,vehicle_plate:p,return_date:date,odom_before:odom-1000,odom_after:odom}],date);
+}
+const run=(repairs=[repair()],records=base())=>enrich(records,repairs,date)[0];
+const r=run();assert.equal(r.oil.repairNo,'REP-2');assert.equal(r.oil.dateSource,'repair.date');assert.equal(r.oil.odometer,100000);assert.equal(r.nextProgram,'M');assert.equal(r.dueKm,135000);assert.equal(r.dueDate,'2027-02-01');assert.equal(r.remainingKm,25000);assert.equal(r.status,'normal');
+for(const [program,next]of [['S','M'],['M','S2'],['S2','L'],['L','S']])assert.equal(run([repair({oil_program:program,repair_list:'เปลี่ยนถ่ายน้ำมันเครื่อง'})]).nextProgram,next);
+for(const [plate,type,km]of [['30-5115 สข','รถบัสปรับอากาศ 1 ชั้น 40 ที่นั่ง',20000],['30-5145 สข','',20000],['30-5456 สข','',10000],['30-5455 สข','',10000],['ฮท-1234 สข','รถตู้ปรับอากาศ 10 ที่นั่ง',10000]])assert.equal(run([repair({plate})],base(plate,type,105000)).dueKm,100000+km);
+assert.equal(run([repair({date:'2026-08-31'})]).dueDate,'2027-02-28');
+assert.equal(run([repair(),repair({repair_no:'REP-3',date:'2026-10-01',mileage:130000,oil_program:'L',status:'รออะไหล่'})]).oil.repairNo,'REP-2');
+assert.equal(run([repair({status:'กำลังซ่อม'})]).oil,null);
+const mostRecent=run([repair({repair_no:'OLD',date:'2026-07-01',mileage:90000}),repair({repair_no:'NEW',date:'2026-09-01',mileage:105000})]);assert.equal(mostRecent.oil.repairNo,'NEW');assert.equal(mostRecent.repairHistory.length,2);
+const zero=run([repair(),repair({repair_no:'NEW-ZERO',date:'2026-10-01',mileage:0})]);assert.equal(zero.oil.repairNo,'NEW-ZERO');assert.equal(zero.status,'review');assert.equal(zero.dueKm,null);
+const conflict=run([repair({repair_list:'เปลี่ยนถ่ายน้ำมันเครื่องโปรแกรม PS2'})]);assert.equal(conflict.status,'review');assert.equal(conflict.nextProgram,null);assert.equal(conflict.dueKm,null);
+assert.equal(run([repair({repair_list:'เปลี่ยนถ่ายน้ำมันเครื่องโปรแกรม S1'})]).nextProgram,'M');
+assert.equal(run([repair({oil_program:'',repair_list:'ถ่ายน้ำมันเครื่อง'})]).status,'review');
+assert.equal(run([repair({date:'2027-01-01'})]).status,'review');
+assert.equal(run([repair({date:'2026-02-30'})]).dueDate,null);
+assert.equal(run([repair({plate:'30-1001  สข'})]).oil.odometer,100000,'spaces normalized');
+assert.equal(run([repair({plate:'30-1001 กท'})]).oil,null,'conflicting province excluded');
+assert.equal(run([repair()],base('30-1001 สข','Unknown')).status,'pending');
+assert.equal(run([repair()],base('30-1001 สข','รถบัสปรับอากาศ 1 ชั้น 40 ที่นั่ง',140000)).status,'due');
+assert.equal(run([repair()],base('30-1001 สข','รถบัสปรับอากาศ 1 ชั้น 40 ที่นั่ง',133000)).status,'near');
+const decreasing=run([repair({repair_no:'OLD',date:'2026-07-01',mileage:105000}),repair()]);assert.equal(decreasing.status,'review');
+assert.equal(run([repair()],base('30-1001 สข','รถบัสปรับอากาศ 1 ชั้น 40 ที่นั่ง',90000)).status,'review');
+console.log('PASS: completed repairs only, latest per vehicle, all cycle transitions/rules, date provenance/calendar month end, zero/conflicting/missing data, province matching, overdue/near and mileage decreases');

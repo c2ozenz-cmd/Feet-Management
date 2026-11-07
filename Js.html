@@ -342,6 +342,8 @@ function navigateTo(page) {
     if (!InspectionUI.canLeave()) return;
   }
   currentPageName = page;
+  document.body.classList.toggle('fleet-active', page === 'buses');
+  document.body.classList.toggle('dashboard-v2-active', page === 'dashboard');
   document.body.classList.toggle('inspection-active',page==='inspections');
   if(page!=='inspections')document.body.classList.remove('inspection-editing');
   if (typeof toggleQuickActions === 'function') toggleQuickActions(true);
@@ -479,129 +481,7 @@ function statusBadge(status) {
 
 // ── DASHBOARD ──
 function loadDashboard() {
-  // clock
-  const updateClock = () => {
-    const now = new Date();
-    document.getElementById('dashDatetime').textContent =
-      now.toLocaleDateString('th-TH', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
-      + ' ' + now.toLocaleTimeString('th-TH');
-  };
-  updateClock();
-  setInterval(updateClock, 1000);
-  loadWeeklySummary(0);
-
-  // repairs
-  google.script.run.withSuccessHandler(repairs => {
-    allRepairs = repairs || [];
-
-    const waiting      = repairs.filter(r => r.status === 'รอดำเนินการ');
-    const inProgress   = repairs.filter(r => r.status === 'กำลังซ่อม');
-    const waitingParts = repairs.filter(r => r.status === 'รออะไหล่');
-    const pending      = repairs.filter(r => r.status !== 'เสร็จแล้ว');
-
-    document.getElementById('dashWaiting').textContent      = waiting.length;
-    document.getElementById('dashInProgress').textContent   = inProgress.length;
-    document.getElementById('dashWaitingParts').textContent = waitingParts.length;
-    document.getElementById('dashPendingCount').textContent = pending.length + ' รายการ';
-
-    // แสดงเฉพาะงานที่ยังไม่เสร็จ เรียงวันที่ใหม่สุดก่อน
-    const tbody = document.getElementById('dashRecentRepairs');
-    tbody.closest('table').classList.add('table-card-mobile');
-    tbody.innerHTML = pending.length
-      ? pending
-          .sort((a,b) => new Date(b.date) - new Date(a.date))
-          .slice(0, 8)
-          .map(r => `
-            <tr>
-              <td data-label="เลขที่">
-                <a href="#" onclick="editRepair('${r.repairNo}')"
-                  class="text-decoration-none fw-semibold">
-                  ${r.repairNo}
-                </a>
-              </td>
-              <td data-label="ทะเบียน">${r.plate}</td>
-              <td data-label="สถานะ">${statusBadge(r.status)}</td>
-              <td data-label="วันที่">${formatDate(r.date)}</td>
-            </tr>`).join('')
-      : `<tr><td colspan="4" data-label="" class="text-center text-muted py-4">
-           <i class="bi bi-check-circle text-success d-block mb-1 fs-5"></i>
-           ไม่มีงานค้าง
-         </td></tr>`;
-  }).getRepairs();
-
-  // PO รออนุมัติ
-  google.script.run.withSuccessHandler(pos => {
-    allPOs = pos || [];
-    const pending = pos.filter(p => p.status === 'รออนุมัติ');
-    document.getElementById('dashPOPending').textContent = pending.length;
-  }).getPOs();
-
-  // stock + expiry
-  google.script.run.withSuccessHandler(stock => {
-    allStock = stock || [];
-    const low = stock.filter(s =>
-      parseFloat(s.qty) <= parseFloat(s.minQty) && parseFloat(s.minQty) > 0
-    );
-    document.getElementById('dashLowStock').innerHTML = low.length
-      ? low.slice(0,5).map(s => `
-          <div class="d-flex justify-content-between align-items-center
-                       py-2 border-bottom" style="font-size:13px">
-            <span>${s.partName}</span>
-            <span class="badge"
-              style="background:rgba(192,80,80,0.15);color:var(--claude-danger)">
-              เหลือ ${s.qty} ${s.unit}
-            </span>
-          </div>`).join('')
-      : `<div class="text-muted text-center py-2 small">
-           <i class="bi bi-check-circle text-success me-1"></i>อะไหล่เพียงพอทั้งหมด
-         </div>`;
-  }).getStock();
-
-  // รถใกล้หมดอายุ
-  google.script.run.withSuccessHandler(buses => {
-    allBuses = buses || [];
-    const today = new Date();
-    const alerts = [];
-
-    buses.forEach(b => {
-      [
-        { label: 'ทะเบียน', date: b.regExpiry },
-        { label: 'ประกัน',  date: b.insuranceExpiry }
-      ].forEach(({ label, date }) => {
-        if (!date) return;
-        const diff = Math.ceil((new Date(date) - today) / 86400000);
-        if (diff <= 60) {
-          alerts.push({ plate: b.plate, label, diff, date });
-        }
-      });
-    });
-
-    alerts.sort((a,b) => a.diff - b.diff);
-
-    document.getElementById('dashExpiryAlert').innerHTML = alerts.length
-      ? alerts.slice(0,5).map(a => {
-          const color = a.diff < 0
-            ? 'var(--claude-danger)'
-            : a.diff <= 30 ? 'var(--claude-warning)' : 'var(--claude-text-muted)';
-          const label = a.diff < 0
-            ? `หมดอายุแล้ว ${Math.abs(a.diff)} วัน`
-            : `อีก ${a.diff} วัน`;
-          return `
-            <div class="d-flex justify-content-between align-items-center
-                         py-2 border-bottom" style="font-size:13px">
-              <span>
-                <span class="fw-semibold">${a.plate}</span>
-                <span class="text-muted ms-1">(${a.label})</span>
-              </span>
-              <span style="color:${color};font-size:12px;font-weight:600">
-                ${label}
-              </span>
-            </div>`;
-        }).join('')
-      : `<div class="text-muted text-center py-2 small">
-           <i class="bi bi-check-circle text-success me-1"></i>ไม่มีรายการใกล้หมดอายุ
-         </div>`;
-  }).getFullBuses();
+  DashboardUI.load();
 }
 
 
@@ -614,14 +494,18 @@ function loadWeeklySummary(offset) {
   // ปิด/เปิดปุ่ม next ถ้าเป็นสัปดาห์ปัจจุบัน
   const nextBtn = document.getElementById('weekNextBtn');
   if (nextBtn) nextBtn.disabled = _weekOffset >= 0;
+  _weeklyData = null;
+  ['wkOpened', 'wkDone', 'wkPending', 'wkCarry'].forEach(id => _setTxt(id, '—'));
+  _setTxt('weeklyLabel', 'กำลังอ่านข้อมูล...');
+  document.getElementById('weeklyExtra').style.display = 'none';
 
   google.script.run
     .withSuccessHandler(data => {
-      if (!data.success) return;
+      if (!data.success) { _setTxt('weeklyLabel', 'อ่านข้อมูลรายสัปดาห์ไม่สำเร็จ'); return; }
       _weeklyData = data;
       _renderWeeklySummary(data);
     })
-    .withFailureHandler(e => console.warn('Weekly summary error:', e.message))
+    .withFailureHandler(() => _setTxt('weeklyLabel', 'อ่านข้อมูลรายสัปดาห์ไม่สำเร็จ'))
     .getWeeklySummary(_weekOffset);
 }
 
@@ -637,67 +521,7 @@ function shiftWeek(offsetOrDelta) {
 }
 
 function _renderWeeklySummary(data) {
-  // Label สัปดาห์
-  const labelEl = document.getElementById('weeklyLabel');
-  if (labelEl) {
-    labelEl.textContent = data.weekLabel +
-      (data.weekOffset === 0 ? ' (สัปดาห์นี้)' :
-       data.weekOffset === -1 ? ' (สัปดาห์ที่แล้ว)' :
-       ` (${Math.abs(data.weekOffset)} สัปดาห์ก่อน)`);
-  }
-
-  // Stat numbers
-  _setTxt('wkOpened',  data.openedCount);
-  _setTxt('wkDone',    data.doneCount);
-  _setTxt('wkPending', data.pendingCount);
-  _setTxt('wkCarry',   data.carryOverCount);
-
-  // เปลี่ยนสีตาม pendingCount
-  const pendEl = document.getElementById('wkPending');
-  if (pendEl) {
-    pendEl.style.color = data.pendingCount > 10
-      ? 'var(--claude-danger)'
-      : data.pendingCount > 5
-        ? 'var(--claude-warning)'
-        : 'var(--claude-secondary)';
-  }
-
-  // Extra section (top plates + by status)
-  const extra = document.getElementById('weeklyExtra');
-  if (extra) extra.style.removeProperty('display');
-
-  // Top Plates
-  const plateEl = document.getElementById('wkTopPlates');
-  if (plateEl) {
-    plateEl.innerHTML = data.topPlates.length
-      ? data.topPlates.map((p, i) => `
-          <div class="d-flex align-items-center gap-2 mb-2">
-            <span style="width:20px;height:20px;border-radius:50%;
-                         background:var(--claude-primary);color:white;
-                         display:flex;align-items:center;justify-content:center;
-                         font-size:11px;font-weight:700;flex-shrink:0">${i+1}</span>
-            <span class="fw-semibold" style="font-size:13px">${p.plate}</span>
-            <span class="badge rounded-pill"
-              style="background:rgba(217,119,87,.15);color:var(--claude-primary);
-                     font-size:11px;margin-left:auto">
-              ${p.count} งาน
-            </span>
-          </div>`).join('')
-      : '<span class="text-muted small">ไม่มีงานเปิดสัปดาห์นี้</span>';
-  }
-
-  // By Status
-  const statusEl = document.getElementById('wkByStatus');
-  if (statusEl) {
-    const entries = Object.entries(data.byStatus);
-    statusEl.innerHTML = entries.length
-      ? entries.map(([st, cnt]) => `
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            ${statusBadge(st)}
-            <span class="fw-bold" style="font-size:13px">${cnt} งาน</span>
-          </div>`).join('')
-      : '<span class="text-muted small">ไม่มีงานค้าง 🎉</span>';
-  }
+  DashboardUI.renderWeekly(data);
 }
 
 function _setTxt(id, val) {
@@ -920,6 +744,7 @@ function loadRepairs() {
   showRepairList();
   google.script.run.withSuccessHandler(r => {
     allRepairs = r || [];
+    DashboardUI.consume('repairs');
     filterRepairs();
   }).getRepairs();
   loadBusPlates();
@@ -961,7 +786,7 @@ function filterRepairs() {
   const m = document.getElementById('repairMonthFilter').value;
   renderRepairTable(allRepairs.filter(r =>
     (!q || r.repairNo.toLowerCase().includes(q) || r.plate.toLowerCase().includes(q)) &&
-    (!s || r.status === s) &&
+    (!s || (s === 'pending' ? r.status !== 'เสร็จแล้ว' : r.status === s)) &&
     (!m || r.date.startsWith(m))
   ));
 }
@@ -1465,12 +1290,13 @@ function loadPOs(options = {}) {
   }
   google.script.run.withSuccessHandler(pos => {
     allPOs = pos || [];
+    const fromDashboard = DashboardUI.consume('po');
     poHistoryLoaded = false;
     if (poViewMode === 'history') loadPOHistory(true);
     lastPOAutoRefreshAt = Date.now();
     
     // ตั้งค่าตัวเลือกเดือนเริ่มต้นเป็นเดือนล่าสุดที่มีข้อมูล PO เพื่อการแสดงผลที่ตอบโจทย์
-    if (allPOs.length > 0) {
+    if (allPOs.length > 0 && !fromDashboard) {
       let latestMonth = '';
       allPOs.forEach(p => {
         if (p.issueDate && p.issueDate.length >= 7) {
@@ -3600,7 +3426,8 @@ function loadStock() {
   google.script.run.withSuccessHandler(stock => {
     allStock = stock || [];
     updateStockStats(stock);
-    renderStockTable(stock);
+    if (DashboardUI.consume('stock')) filterStock();
+    else renderStockTable(stock);
   }).getStock();
   loadStockLog();
 }
@@ -4805,9 +4632,15 @@ function setBusView(mode) {
   document.getElementById('busCardView').classList.toggle('d-none',  mode !== 'card');
   document.getElementById('viewTableBtn').classList.toggle('active', mode === 'table');
   document.getElementById('viewCardBtn').classList.toggle('active',  mode === 'card');
+  document.getElementById('viewTableBtn').setAttribute('aria-pressed', String(mode === 'table'));
+  document.getElementById('viewCardBtn').setAttribute('aria-pressed', String(mode === 'card'));
 }
 
-function renderBuses(buses) { renderBusTable(buses); renderBusCards(buses); }
+function renderBuses(buses) {
+  if (DashboardUI.consume('buses')) { filterBuses(); return; }
+  document.getElementById('fleet-directory-count').textContent = buses.length.toLocaleString('th-TH') + ' จาก ' + allBusesData.length.toLocaleString('th-TH') + ' ทะเบียน';
+  renderBusTable(buses); renderBusCards(buses);
+}
 
 function getBusStatusForPlate(plate) {
   const active = allRepairs.filter(r => r.plate === plate && r.status !== 'เสร็จแล้ว');
@@ -4830,7 +4663,7 @@ function busExpiryTag(dateStr) {
 
 function renderBusTable(buses) {
   const tbody = document.getElementById('busTableBody');
-  tbody.closest('table').classList.add('table-card-mobile');
+  tbody.closest('table').classList.remove('table-card-mobile');
   if (!buses.length) {
     tbody.innerHTML = '<tr><td colspan="7" data-label=""><div class="empty-state"><i class="bi bi-bus-front"></i>ยังไม่มีข้อมูลรถบัส</div></td></tr>';
     return;
@@ -4865,7 +4698,7 @@ function renderBusCards(buses) {
     const st  = getBusStatusForPlate(b.plate);
     const cnt = allRepairs.filter(r => r.plate === b.plate).length;
     return '<div class="col-sm-6 col-xl-4">' +
-      '<div class="card h-100" style="border-left:4px solid var(--claude-primary)">' +
+      '<div class="card h-100 fleet-record">' +
       '<div class="card-body">' +
         '<div class="d-flex justify-content-between align-items-start mb-3">' +
           '<div><div class="fw-bold fs-5" style="color:var(--claude-secondary)">' + b.plate + '</div>' +

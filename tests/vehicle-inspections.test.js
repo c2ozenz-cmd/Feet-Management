@@ -8,7 +8,17 @@ const actor={id:'staff',name:'Staff',role:'user'};
 const token=createSessionToken(actor);
 const id=crypto.randomUUID();
 const valid={plate:'30-1111 สข',inspectedAt:'2026-11-05T08:30',route:'หาดใหญ่',driver1:'คนขับ เปลี่ยนได้',inspector:'เจ้าหน้าที่',answers:Object.fromEntries(model.template.map(item=>[item.id,{status:'pass',count:item.count?2:null}]))};
-assert.ok(model.template.length>60);
+assert.equal(model.template.length,61);
+assert.equal(model.getTemplate('daily-v1').length,68);
+assert.equal(new Set(model.template.map(item=>item.id)).size,61);
+for(const word of ['ค้อนทุบกระจก','ถังดับเพลิง','เข็มขัดนิรภัย','สมุดประจำรถ','GPS','ไฟกริ่ง']) {
+  assert.equal(model.template.filter(item=>item.label.includes(word)).length,1,word);
+}
+for(const item of model.template)assert.equal(item.group,model.getTemplate('daily-v1').find(old=>old.id===item.id).group);
+const legacy={...valid,templateVersion:'daily-v1',answers:Object.fromEntries(model.getTemplate('daily-v1').map(item=>[item.id,{status:'pass',count:item.count?2:null}]))};
+assert.equal(model.normalize(legacy,true).template.length,68);
+assert.equal(model.normalize(legacy,true).answers['g10-5'].count,2);
+assert.throws(()=>model.normalize({...valid,templateVersion:'unknown'}),/รุ่นแบบตรวจ/);
 assert.equal(model.summary(model.normalize(valid,true)).failed,0);
 assert.throws(()=>model.normalize({...valid,driver1:''},true),/คนขับ/);
 const bad=structuredClone(valid);bad.answers[model.template[0].id]={status:'fail'};
@@ -44,6 +54,15 @@ const call=async(method,body,query={},auth=token)=>{const r=await handler({httpM
   assert.equal((await call('POST',{action:'save',id:draftId,state:'draft',revision:1,record:valid},{},other)).code,403);
   const records=await call('GET');assert.equal(records.records.length,2);
   assert.equal(records.records.find(r=>r.id===id).failed,1);
+  const legacyId=crypto.randomUUID();
+  await call('POST',{action:'save',id:legacyId,state:'draft',record:legacy});
+  const original=JSON.parse(rows.find(row=>row.key.endsWith(legacyId)).value);
+  assert.equal(original.templateVersion,'daily-v1');
+  await call('POST',{action:'save',id:legacyId,state:'submitted',revision:1,record:{...legacy,templateVersion:model.version}});
+  const submitted=JSON.parse(rows.find(row=>row.key.endsWith(legacyId)).value);
+  assert.equal(submitted.state,'submitted');
+  assert.deepEqual(submitted.template,original.template,'existing drafts retain their server-side version');
+  assert.deepEqual(submitted.answers,original.answers,'legacy answers must not shift or disappear');
   assert.deepEqual([...tablesTouched].sort(),['buses','settings'],'no repair or PO mutations');
   console.log('PASS: complete checklist, failed-item notes, optional checks, draft/submit, immutable history, owner permissions, revision conflict, plate QR validation and independent storage');
 })().catch(e=>{console.error(e);process.exitCode=1;});
